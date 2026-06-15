@@ -450,7 +450,7 @@ const BRANCH_SEL_KEY="branch_selected_v1";
 
 // ---- State ----
 let st={branch:"dallas",tab:"today",todayView:"entry",openIdx:null,detailDate:null,trendRange:30,briefings:{},branchBriefings:{},syncStatus:"local",syncError:"",managerName:"",selectedDate:null,rollupDate:null,branchRoutes:{},budgets:{},driverRange:30,notifSettings:{},routeMgmtOpen:false,showFinishedRoutes:false,attendanceMonth:null,attendanceDay:null,budgetMonth:null,recapDismissed:null,rollupPeriod:"monthly",rollupDM:"auto",recentBranches:[],branchPickerOpen:false,rollupSort:"name"};
-let fb={app:null,db:null,unsubAll:null,unsubBudgets:null,modules:null};
+let fb={app:null,db:null,auth:null,modules:null,unsubAll:null,branchUnsubs:{},unsubBranches:null,unsubBudgets:null};
 let wt=null;
 
 function activeBranch(){return BRANCHES[st.branch]||BRANCHES.dallas;}
@@ -743,35 +743,69 @@ window.doSignOut=async function(){
   await signOut(fb.auth);
 };
 
-function subAllBranches(){
-  const{collection,onSnapshot}=fb.modules;
-  // Unsubscribe existing listeners
-  if(fb.unsubAll){fb.unsubAll();fb.unsubAll=null;}
-  if(fb.unsubBranches){fb.unsubBranches.forEach(u=>u());fb.unsubBranches=null;}
-  // Subscribe to every branch collection simultaneously
-  const unsubs=BRANCH_IDS.map(bid=>{
-    return onSnapshot(
-      collection(fb.db,BRANCHES[bid].collection),
-      (snap)=>{
-        const fc=bid===st.branch?capFocus():null;
-        const u={};snap.forEach(d=>{u[d.id]=d.data();});
-        // Repair contamination inline
-        Object.keys(u).forEach(dk=>{
-          if(briefingIsContaminated(u[dk],bid))u[dk]=repairBriefing(u[dk],bid);
+// ---- Lazy subscription system ----
+// Only subscribe to branches needed for the current view.
+// Active branch: always subscribed.
+// Rollup tab: DM region or all branches (user-controlled).
+// Other tabs: active branch only.
+// Cache is preserved — switching tabs doesn't re-read Firestore.
+
+let _lastSubBids = [];
+
+function getNeededBids(){
+  const needed = new Set([st.branch]);
+  if(st.tab === "rollup"){
+    const activeDM = st.rollupDM === "auto" ? dmForBranch(st.branch) : st.rollupDM || null;
+    const rollupBids = activeDM ? DM_GROUPS[activeDM] || BRANCH_IDS : BRANCH_IDS;
+    rollupBids.forEach(b => needed.add(b));
+  }
+  return [...needed];
+}
+
+function subNeededBranches(){
+  if(!fb.modules || !fb.db) return;
+  const{collection, onSnapshot} = fb.modules;
+  const needed = getNeededBids();
+
+  // Unsubscribe listeners for branches no longer needed
+  const newUnsubs = {};
+  if(fb.branchUnsubs){
+    Object.entries(fb.branchUnsubs).forEach(([bid, unsub]) => {
+      if(!needed.includes(bid)){unsub(); }
+      else newUnsubs[bid] = unsub;
+    });
+  }
+  fb.branchUnsubs = newUnsubs;
+
+  // Subscribe to any newly needed branches not yet subscribed
+  needed.forEach(bid => {
+    if(fb.branchUnsubs[bid]) return; // already subscribed
+    fb.branchUnsubs[bid] = onSnapshot(
+      collection(fb.db, BRANCHES[bid].collection),
+      (snap) => {
+        const fc = bid === st.branch ? capFocus() : null;
+        const u = {}; snap.forEach(d => { u[d.id] = d.data(); });
+        Object.keys(u).forEach(dk => {
+          if(briefingIsContaminated(u[dk], bid)) u[dk] = repairBriefing(u[dk], bid);
         });
-        st.branchBriefings[bid]=u;
-        // Keep st.briefings in sync with active branch
-        if(bid===st.branch)st.briefings=u;
+        st.branchBriefings[bid] = u;
+        if(bid === st.branch) st.briefings = u;
         render();
-        if(fc)resFocus(fc);
+        if(fc) resFocus(fc);
       },
-      (err)=>{console.error(`Snapshot error for ${bid}:`,err.code,err.message);}
+      (err) => { console.error(`Snapshot error for ${bid}:`, err.code, err.message); }
     );
   });
-  fb.unsubBranches=unsubs;
+  _lastSubBids = needed;
 }
-// Keep subAll as alias for switchBranch compatibility — now a no-op since subAllBranches handles everything
-function subAll(){subAllBranches();}
+
+// Called after imports — resubscribes only needed branches
+function subAllBranches(){ subNeededBranches(); }
+
+// Called on tab switch — subscribe any newly needed branches
+function onTabChange(){ subNeededBranches(); }
+
+function subAll(){ subNeededBranches(); }
 async function writeB(b,branchId){
   const bid=branchId||st.branch;
   if(st.syncStatus!=="live"||!fb.modules||!fb.db){persistLocal();return;}
@@ -786,9 +820,10 @@ async function deleteB(key){
 }
 function discFb(){
   if(fb.unsubAll){fb.unsubAll();fb.unsubAll=null;}
+  if(fb.branchUnsubs){Object.values(fb.branchUnsubs).forEach(u=>u());fb.branchUnsubs={};}
   if(fb.unsubBranches){fb.unsubBranches.forEach(u=>u());fb.unsubBranches=null;}
   if(fb.unsubBudgets){fb.unsubBudgets();fb.unsubBudgets=null;}
-  fb={app:null,db:null,unsubAll:null,unsubBranches:null,unsubBudgets:null,modules:null};
+  fb={app:null,db:null,auth:null,unsubAll:null,branchUnsubs:{},unsubBranches:null,unsubBudgets:null,modules:null};
   st.syncStatus="local";
 }
 function capFocus(){const el=document.activeElement;if(!el||(!(el.id)&&!el.dataset.field))return null;return{id:el.id,ri:el.dataset&&el.dataset.ri,field:el.dataset&&el.dataset.field,value:el.value,ss:el.selectionStart,se:el.selectionEnd};}
@@ -927,6 +962,7 @@ window.switchTab=function(t){
   if(st.tab===t)return;
   if(st.tab==="today"&&st.todayView==="entry"){const b=ensureToday();collectTo(b);qW(b);}
   st.tab=t;st.detailDate=null;
+  onTabChange(); // subscribe any newly needed branches
   // Animate tab transition
   const root=document.getElementById("root");
   root.style.opacity="0";root.style.transform="translateY(6px)";
@@ -1145,7 +1181,7 @@ window.copyB=async function(key){
     const meta=[];
     if(r.assets!==""&&r.assets!=null)meta.push(`${r.assets}a`);if(r.locations!==""&&r.locations!=null)meta.push(`${r.locations}l`);
     if((parseInt(r.missed)||0)>0)meta.push(`${r.missed}m`);if(r.pushed==="yes")meta.push("pushed");
-    if((parseInt(r.missedRestocks)||0)>0)meta.push(`${r.missedRestocks}mr`);
+    if((parseInt(r.missedRestocks)||0)>0)meta.push(`${r.missedRestocks} restock btn`);
     if((parseInt(r.emptyCoils)||0)>0)meta.push(`${r.emptyCoils}ec`);
     if((parseFloat(r.spoils)||0)>0){const rv=parseMoney(r.revenue?.vending)+parseMoney(r.revenue?.market)+parseMoney(r.revenue?.ocs);const pct=rv>0?(parseFloat(r.spoils)/rv*100).toFixed(1)+"% rev":"$"+r.spoils;meta.push(`spoils ${pct}`);}
     if((parseFloat(r.shrink)||0)!==0){const rv=parseMoney(r.revenue?.vending)+parseMoney(r.revenue?.market)+parseMoney(r.revenue?.ocs);const sh=parseFloat(r.shrink);const pct=rv>0?(Math.abs(sh)/rv*100).toFixed(1)+"% rev":"$"+Math.abs(sh);meta.push(`shrink ${sh<0?"-":""}${pct}`);}
@@ -1398,7 +1434,7 @@ window._importRevenueXL=function(){
       });
       // Pause listeners during import to prevent Firestore overwriting clean data
       const wasLive=st.syncStatus==="live";
-      if(wasLive&&fb.unsubBranches){fb.unsubBranches.forEach(u=>u());fb.unsubBranches=null;}
+      if(wasLive&&fb.branchUnsubs){Object.values(fb.branchUnsubs).forEach(u=>u());fb.branchUnsubs={};}
 
       // Collect all write promises — only resubscribe AFTER every write has landed
       const allWrites=[];
@@ -1967,7 +2003,7 @@ function renderRoute(r,i){
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
         <div class="field"><label class="field-lbl">Safety score</label><input data-ri="${i}" data-field="safetyScore" type="number" min="0" max="100" step="0.1" value="${esc(r.safetyScore)}" oninput="onFI()" placeholder="—"></div>
-        <div class="field"><label class="field-lbl">Missed restocks</label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
+        <div class="field"><label class="field-lbl">Missed Restocks <span style="font-size:9px;font-weight:500;color:var(--text-3);text-transform:none;letter-spacing:0">(restock btn not pressed)</span></label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
         <div class="field"><label class="field-lbl">Empty coils</label><input data-ri="${i}" data-field="emptyCoils" type="number" min="0" value="${esc(r.emptyCoils||0)}" oninput="onFI()"></div>
         <div class="field"><label class="field-lbl">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
         <div class="field"><label class="field-lbl">Shrink ($)</label><input data-ri="${i}" data-field="shrink" type="number" min="0" step="0.01" value="${esc(r.shrink||0)}" oninput="onFI()" placeholder="0.00"></div>
@@ -2006,11 +2042,16 @@ function renderRoute(r,i){
 }
 
 // ---- Yesterday's Recap Card ----
-window.dismissRecap=function(){st.recapDismissed=todayKey();render();};
+function recapDismissKey(){return`recap_dismissed_${fbUser?.uid||"anon"}`;}
+function isRecapDismissed(){try{return localStorage.getItem(recapDismissKey())===todayKey();}catch(e){return false;}}
+window.dismissRecap=function(){
+  try{localStorage.setItem(recapDismissKey(),todayKey());}catch(e){}
+  st.recapDismissed=todayKey();render();
+};
 
 function renderRecapCard(){
   // Don't show if dismissed today
-  if(st.recapDismissed===todayKey())return"";
+  if(isRecapDismissed())return"";
 
   // Get yesterday's briefing
   const yest=new Date();yest.setDate(yest.getDate()-1);
@@ -2227,7 +2268,7 @@ function renderSum(b,opts={}){
       const meta=[];
       if(r.assets!==""&&r.assets!=null)meta.push(`${r.assets} assets`);if(r.locations!==""&&r.locations!=null)meta.push(`${r.locations} locs`);if((parseInt(r.missed)||0)>0)meta.push(`${r.missed} missed`);if(r.pushed==="yes")meta.push("pushed");
       if(r.safetyScore!==""&&r.safetyScore!=null){const sc=parseFloat(r.safetyScore);const scCls=sc>=95?"kv-s":sc>=85?"kv-w":"kv-d";meta.push(`<span class="${scCls}" style="font-weight:500">⚡${r.safetyScore}</span>`);}
-      if((parseInt(r.missedRestocks)||0)>0)meta.push(`${r.missedRestocks} restocks`);
+      if((parseInt(r.missedRestocks)||0)>0)meta.push(`${r.missedRestocks} missed restock btn`);
       if((parseInt(r.emptyCoils)||0)>0)meta.push(`${r.emptyCoils} empty coils`);
       if((parseFloat(r.spoils)||0)>0){const rv=parseMoney(r.revenue?.vending)+parseMoney(r.revenue?.market)+parseMoney(r.revenue?.ocs);const pct=rv>0?(parseFloat(r.spoils)/rv*100).toFixed(1)+"% rev":"$"+r.spoils;meta.push(`spoils ${pct}`);}
       if((parseFloat(r.shrink)||0)!==0){const rv=parseMoney(r.revenue?.vending)+parseMoney(r.revenue?.market)+parseMoney(r.revenue?.ocs);const sh=parseFloat(r.shrink);const pct=rv>0?(Math.abs(sh)/rv*100).toFixed(1)+"% rev":"$"+Math.abs(sh);meta.push(`shrink ${sh<0?"-":""}${pct}`);}
@@ -2626,7 +2667,7 @@ function renderRollup(){
     ${[{k:'name',l:'A–Z'},{k:'revenue',l:'Revenue'},{k:'ot',l:'On-Time'},{k:'safety',l:'Safety'},{k:'missed',l:'Missed'}].map(s=>`<button class="range-btn${sort===s.k?' on':''}" onclick="st.rollupSort='${s.k}';render()" style="flex:1">${s.l}</button>`).join('')}
   </div>`;
   const dmSelector=`<div style="margin-bottom:12px">
-    <select onchange="st.rollupDM=this.value;render()" style="width:100%;padding:9px 12px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text);font-size:13px;font-weight:500;min-height:38px">
+    <select onchange="st.rollupDM=this.value;onTabChange();render()" style="width:100%;padding:9px 12px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text);font-size:13px;font-weight:500;min-height:38px">
       <option value="" ${!activeDM?'selected':''}>All Branches (${BRANCH_IDS.length})</option>
       ${Object.entries(DM_GROUPS).sort((a,b)=>a[0].localeCompare(b[0])).map(([dm,bids])=>`<option value="${esc(dm)}" ${activeDM===dm?'selected':''}>${esc(dm)} (${bids.length} branches)</option>`).join('')}
     </select>
