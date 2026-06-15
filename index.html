@@ -73,6 +73,7 @@ textarea{height:64px;resize:none}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 @keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
 /* ── Status stepper ── */
 .status-stepper{display:flex;margin-bottom:18px;border-radius:var(--radius-lg);overflow:hidden;border:1.5px solid var(--border-2);box-shadow:var(--shadow-sm)}
@@ -744,16 +745,17 @@ window.doSignOut=async function(){
 };
 
 // ---- Lazy subscription system ----
-// Only subscribe to branches needed for the current view.
-// Active branch: always subscribed.
-// Rollup tab: DM region or all branches (user-controlled).
-// Other tabs: active branch only.
-// Cache is preserved — switching tabs doesn't re-read Firestore.
+// Active branch + recent branches preloaded on startup.
+// Rollup tab: DM region or all branches on demand.
+// Cache preserved across tab switches — no redundant reads.
 
 let _lastSubBids = [];
+const _loadingBids = new Set(); // branches subscribed but not yet received first snapshot
 
 function getNeededBids(){
   const needed = new Set([st.branch]);
+  // Preload recent branches (up to 4) so switching feels instant
+  (st.recentBranches||[]).slice(0,4).forEach(b => needed.add(b));
   if(st.tab === "rollup"){
     const activeDM = st.rollupDM === "auto" ? dmForBranch(st.branch) : st.rollupDM || null;
     const rollupBids = activeDM ? DM_GROUPS[activeDM] || BRANCH_IDS : BRANCH_IDS;
@@ -767,11 +769,11 @@ function subNeededBranches(){
   const{collection, onSnapshot} = fb.modules;
   const needed = getNeededBids();
 
-  // Unsubscribe listeners for branches no longer needed
+  // Unsubscribe listeners for branches no longer needed (not active, not recent, not rollup)
   const newUnsubs = {};
   if(fb.branchUnsubs){
     Object.entries(fb.branchUnsubs).forEach(([bid, unsub]) => {
-      if(!needed.includes(bid)){unsub(); }
+      if(!needed.includes(bid)){unsub(); _loadingBids.delete(bid);}
       else newUnsubs[bid] = unsub;
     });
   }
@@ -780,6 +782,7 @@ function subNeededBranches(){
   // Subscribe to any newly needed branches not yet subscribed
   needed.forEach(bid => {
     if(fb.branchUnsubs[bid]) return; // already subscribed
+    _loadingBids.add(bid); // mark as loading until first snapshot arrives
     fb.branchUnsubs[bid] = onSnapshot(
       collection(fb.db, BRANCHES[bid].collection),
       (snap) => {
@@ -790,14 +793,20 @@ function subNeededBranches(){
         });
         st.branchBriefings[bid] = u;
         if(bid === st.branch) st.briefings = u;
+        _loadingBids.delete(bid); // first snapshot received — no longer loading
         render();
         if(fc) resFocus(fc);
       },
-      (err) => { console.error(`Snapshot error for ${bid}:`, err.code, err.message); }
+      (err) => {
+        _loadingBids.delete(bid);
+        console.error(`Snapshot error for ${bid}:`, err.code, err.message);
+      }
     );
   });
   _lastSubBids = needed;
 }
+
+function isActiveBranchLoading(){ return _loadingBids.has(st.branch); }
 
 // Called after imports — resubscribes only needed branches
 function subAllBranches(){ subNeededBranches(); }
@@ -3306,11 +3315,34 @@ function renderNav(){
   `;
 }
 
+function renderSkeleton(){
+  const shimmer='background:linear-gradient(90deg,var(--bg-2) 25%,var(--bg-3) 50%,var(--bg-2) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite';
+  const bar=(w,h=14,r=8)=>`<div style="width:${w};height:${h}px;border-radius:${r}px;${shimmer};margin-bottom:8px"></div>`;
+  return`<div style="padding:4px 0">
+    ${branchPill()}
+    <div style="display:flex;gap:10px;margin-bottom:18px">
+      <div style="width:72px;height:72px;border-radius:50%;${shimmer};flex-shrink:0"></div>
+      <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;align-items:center">
+        ${[1,2,3,4].map(()=>`<div style="background:var(--bg-2);border-radius:var(--radius-lg);padding:12px 8px;text-align:center">${bar('60%',10)}<div style="height:22px;border-radius:6px;${shimmer}"></div></div>`).join('')}
+      </div>
+    </div>
+    <div style="height:52px;border-radius:var(--radius-lg);${shimmer};margin-bottom:18px"></div>
+    ${[1,2,3,4,5].map(()=>`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 15px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+      <div style="width:10px;height:10px;border-radius:50%;${shimmer};flex-shrink:0"></div>
+      <div style="flex:1">${bar('45%',10)}<div style="height:18px;width:65%;border-radius:6px;${shimmer}"></div></div>
+      <div style="width:72px;height:26px;border-radius:20px;${shimmer}"></div>
+    </div>`).join('')}
+  </div>`;
+}
+
 function render(){
   // Always keep the current branch slot in sync with st.briefings
   st.branchBriefings[st.branch]=st.briefings;
   let body="";
-  if(st.tab==="today")body=renderToday();
+  // Show skeleton while active branch data is loading from Firestore
+  if(isActiveBranchLoading()&&(st.tab==="today"||st.tab==="history"||st.tab==="trends"||st.tab==="drivers"||st.tab==="budget")){
+    body=renderSkeleton();
+  } else if(st.tab==="today")body=renderToday();
   else if(st.tab==="history")body=renderHistory();
   else if(st.tab==="trends")body=renderTrends();
   else if(st.tab==="drivers")body=renderDrivers();
