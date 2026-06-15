@@ -2171,13 +2171,15 @@ function renderEntry(){
     const ringColor=pct===1?'var(--ok-line)':pct>0?'var(--warn-line)':'var(--border-2)';
     return`<div style="display:flex;gap:12px;margin-bottom:16px;align-items:stretch">
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:10px 14px;display:flex;align-items:center;gap:12px;flex-shrink:0">
-        <svg width="72" height="72" viewBox="0 0 72 72" style="transform:rotate(-90deg)">
-          <circle cx="36" cy="36" r="${R}" fill="none" stroke="var(--bg-3)" stroke-width="7"/>
-          <circle cx="36" cy="36" r="${R}" fill="none" stroke="${ringColor}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${dash} ${gap}" style="transition:stroke-dasharray .6s cubic-bezier(.2,.8,.3,1)"/>
-        </svg>
-        <div style="position:absolute;width:72px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
-          <div style="font-size:17px;font-weight:800;letter-spacing:-.5px;line-height:1">${finished}<span style="font-size:11px;font-weight:600;color:var(--text-3)">/${total}</span></div>
-          <div style="font-size:8px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">routes</div>
+        <div style="position:relative;width:72px;height:72px;flex-shrink:0">
+          <svg width="72" height="72" viewBox="0 0 72 72" style="transform:rotate(-90deg)">
+            <circle cx="36" cy="36" r="${R}" fill="none" stroke="var(--bg-3)" stroke-width="7"/>
+            <circle cx="36" cy="36" r="${R}" fill="none" stroke="${ringColor}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${dash} ${gap}" style="transition:stroke-dasharray .6s cubic-bezier(.2,.8,.3,1)"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
+            <div style="font-size:17px;font-weight:800;letter-spacing:-.5px;line-height:1">${finished}<span style="font-size:11px;font-weight:600;color:var(--text-3)">/${total}</span></div>
+            <div style="font-size:8px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">routes</div>
+          </div>
         </div>
       </div>
       <div class="status-bar" style="margin-bottom:0;flex:1">
