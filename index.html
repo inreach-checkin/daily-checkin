@@ -2094,15 +2094,15 @@ function renderRoute(r,i){
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
         <div class="field"><label class="field-lbl">Safety score</label><input data-ri="${i}" data-field="safetyScore" type="number" min="0" max="100" step="0.1" value="${esc(r.safetyScore)}" oninput="onFI()" placeholder="—"></div>
-        <div class="field"><label class="field-lbl">Photos taken</label><input data-ri="${i}" data-field="photosTaken" type="number" min="0" value="${esc(r.photosTaken||0)}" oninput="onFI()" placeholder="0"></div>
+        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Photos taken</label><input data-ri="${i}" data-field="photosTaken" type="number" min="0" value="${esc(r.photosTaken||0)}" oninput="onFI()" placeholder="0"></div>
         <div class="field"><label class="field-lbl">Empty coils</label><input data-ri="${i}" data-field="emptyCoils" type="number" min="0" value="${esc(r.emptyCoils||0)}" oninput="onFI()"></div>
-        <div class="field"><label class="field-lbl">Missed Restocks <span style="font-size:9px;font-weight:500;color:var(--text-3);text-transform:none;letter-spacing:0">(restock btn not pressed)</span></label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
-        <div class="field"><label class="field-lbl">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
-        <div class="field"><label class="field-lbl">Shrink ($)</label><input data-ri="${i}" data-field="shrink" type="number" min="0" step="0.01" value="${esc(r.shrink||0)}" oninput="onFI()" placeholder="0.00"></div>
+        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Missed Restocks</label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
+        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
+        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Shrink ($)</label><input data-ri="${i}" data-field="shrink" type="number" min="0" step="0.01" value="${esc(r.shrink||0)}" oninput="onFI()" placeholder="0.00"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="field"><label class="field-lbl">Time started</label><input data-ri="${i}" data-field="timeStarted" type="time" value="${esc(r.timeStarted||'')}" oninput="onFI()" style="font-size:13px;padding:6px 4px;text-align:center"></div>
-        <div class="field"><label class="field-lbl">Time finished</label><input data-ri="${i}" data-field="timeFinished" type="time" value="${esc(r.timeFinished||'')}" oninput="onFI()" style="font-size:13px;padding:6px 4px;text-align:center"></div>
+        <div class="field"><label class="field-lbl">Time started</label><input data-ri="${i}" data-field="timeStarted" type="time" value="${esc(r.timeStarted||'')}" oninput="onFI()" style="font-size:13px;padding:10px 8px;text-align:center"></div>
+        <div class="field"><label class="field-lbl">Time finished</label><input data-ri="${i}" data-field="timeFinished" type="time" value="${esc(r.timeFinished||'')}" oninput="onFI()" style="font-size:13px;padding:10px 8px;text-align:center"></div>
       </div>
       ${(()=>{
         const tor=calcTimeOnRoute(r.timeStarted,r.timeFinished);
