@@ -90,6 +90,13 @@ textarea{height:64px;resize:none}
 .sb-ns{background:var(--danger-bg);color:var(--danger-text)}.sb-ip{background:var(--warn-bg);color:var(--warn-text)}.sb-fn{background:var(--ok-bg);color:var(--ok-text)}
 .status-badge{font-size:11px;padding:4px 11px;border-radius:20px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
 
+/* ── Shimmer skeleton ── */
+.shimmer{background:linear-gradient(90deg,var(--bg-2) 0%,var(--bg-3) 40%,var(--bg-2) 80%);background-size:300% 100%;animation:shimmer 1.6s ease-in-out infinite}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.skel-line{border-radius:6px;height:14px;margin-bottom:8px}
+.skel-circle{border-radius:50%}
+.skel-rect{border-radius:var(--radius-md)}
+
 /* ── Sections ── */
 .section{margin-bottom:22px}
 .section-lbl{font-size:11px;font-weight:800;color:var(--text-2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px;display:block;padding-left:10px;border-left:3px solid var(--brand)}
@@ -589,7 +596,7 @@ function ensureDate(dk){
   if(!st.briefings[dk])st.briefings[dk]=freshBriefing(dk);
   const b=st.briefings[dk];
   if(!b.checkInStatus)b.checkInStatus="not_started";
-  b.routes.forEach(r=>{if(!r.routeStatus)r.routeStatus="not_started";if(!r.totes)r.totes={candy:"no",freezer:"no",cooler:"no",dock:"no"};if(r.secondDriver===undefined)r.secondDriver="";if(r.thirdDriver===undefined)r.thirdDriver="";if(r.safetyScore===undefined)r.safetyScore="";if(r.missedRestocks===undefined)r.missedRestocks=0;if(r.emptyCoils===undefined)r.emptyCoils=0;if(r.spoils===undefined)r.spoils=0;if(r.shrink===undefined)r.shrink=0;if(r.timeStarted===undefined)r.timeStarted="";if(r.timeFinished===undefined)r.timeFinished="";if(!r.revenue)r.revenue={vending:"",market:"",ocs:""};});
+  b.routes.forEach(r=>{if(!r.routeStatus)r.routeStatus="not_started";if(!r.totes)r.totes={candy:"no",freezer:"no",cooler:"no",dock:"no"};if(r.secondDriver===undefined)r.secondDriver="";if(r.thirdDriver===undefined)r.thirdDriver="";if(r.safetyScore===undefined)r.safetyScore="";if(r.missedRestocks===undefined)r.missedRestocks=0;if(r.emptyCoils===undefined)r.emptyCoils=0;if(r.spoils===undefined)r.spoils=0;if(r.shrink===undefined)r.shrink=0;if(r.timeStarted===undefined)r.timeStarted="";if(r.timeFinished===undefined)r.timeFinished="";if(!r.revenue)r.revenue={vending:"",market:"",ocs:""};if(r.photosTaken===undefined)r.photosTaken=0;});
   if(!b.revenue)b.revenue={vending:"",market:"",ocs:""};
   return b;
 }
@@ -744,6 +751,62 @@ window.doSignOut=async function(){
   await signOut(fb.auth);
 };
 
+// ---- IndexedDB cache ----
+// Stores branch briefings locally — on next open, data is available instantly
+// while Firestore listener loads the delta in background.
+const IDB_NAME="inreach-checkin-v1";
+const IDB_STORE="branches";
+const IDB_TTL=7*24*60*60*1000; // 7 days
+
+let _idb=null;
+function openIDB(){
+  if(_idb)return Promise.resolve(_idb);
+  return new Promise((res,rej)=>{
+    const req=indexedDB.open(IDB_NAME,1);
+    req.onupgradeneeded=e=>{e.target.result.createObjectStore(IDB_STORE,{keyPath:"bid"});};
+    req.onsuccess=e=>{_idb=e.target.result;res(_idb);};
+    req.onerror=()=>rej(req.error);
+  });
+}
+async function idbGet(bid){
+  try{
+    const db=await openIDB();
+    return new Promise((res)=>{
+      const req=db.transaction(IDB_STORE).objectStore(IDB_STORE).get(bid);
+      req.onsuccess=()=>{
+        const r=req.result;
+        if(!r||Date.now()-r.ts>IDB_TTL){res(null);return;}
+        res(r.data);
+      };
+      req.onerror=()=>res(null);
+    });
+  }catch(e){return null;}
+}
+async function idbSet(bid,data){
+  try{
+    const db=await openIDB();
+    return new Promise((res)=>{
+      const tx=db.transaction(IDB_STORE,"readwrite");
+      tx.objectStore(IDB_STORE).put({bid,data,ts:Date.now()});
+      tx.oncomplete=()=>res();
+      tx.onerror=()=>res();
+    });
+  }catch(e){}
+}
+
+// Load all recent/needed branches from IDB on startup for instant display
+async function warmCacheFromIDB(bids){
+  await Promise.all(bids.map(async bid=>{
+    if(st.branchBriefings[bid]&&Object.keys(st.branchBriefings[bid]).length)return;
+    const cached=await idbGet(bid);
+    if(cached&&Object.keys(cached).length){
+      st.branchBriefings[bid]=cached;
+      if(bid===st.branch){st.briefings=cached;}
+    }
+  }));
+  render(); // show cached data immediately
+}
+
 // ---- Lazy subscription system ----
 // Active branch + recent branches preloaded on startup.
 // Rollup tab: DM region or all branches on demand.
@@ -769,41 +832,47 @@ function subNeededBranches(){
   const{collection, onSnapshot} = fb.modules;
   const needed = getNeededBids();
 
-  // Unsubscribe listeners for branches no longer needed (not active, not recent, not rollup)
-  const newUnsubs = {};
-  if(fb.branchUnsubs){
-    Object.entries(fb.branchUnsubs).forEach(([bid, unsub]) => {
-      if(!needed.includes(bid)){unsub(); _loadingBids.delete(bid);}
-      else newUnsubs[bid] = unsub;
-    });
-  }
-  fb.branchUnsubs = newUnsubs;
+  // Warm IDB cache first for instant display, then subscribe to Firestore
+  warmCacheFromIDB(needed).then(()=>{
 
-  // Subscribe to any newly needed branches not yet subscribed
-  needed.forEach(bid => {
-    if(fb.branchUnsubs[bid]) return; // already subscribed
-    _loadingBids.add(bid); // mark as loading until first snapshot arrives
-    fb.branchUnsubs[bid] = onSnapshot(
-      collection(fb.db, BRANCHES[bid].collection),
-      (snap) => {
-        const fc = bid === st.branch ? capFocus() : null;
-        const u = {}; snap.forEach(d => { u[d.id] = d.data(); });
-        Object.keys(u).forEach(dk => {
-          if(briefingIsContaminated(u[dk], bid)) u[dk] = repairBriefing(u[dk], bid);
-        });
-        st.branchBriefings[bid] = u;
-        if(bid === st.branch) st.briefings = u;
-        _loadingBids.delete(bid); // first snapshot received — no longer loading
-        render();
-        if(fc) resFocus(fc);
-      },
-      (err) => {
-        _loadingBids.delete(bid);
-        console.error(`Snapshot error for ${bid}:`, err.code, err.message);
-      }
-    );
+    // Unsubscribe listeners for branches no longer needed
+    const newUnsubs = {};
+    if(fb.branchUnsubs){
+      Object.entries(fb.branchUnsubs).forEach(([bid, unsub]) => {
+        if(!needed.includes(bid)){unsub(); _loadingBids.delete(bid);}
+        else newUnsubs[bid] = unsub;
+      });
+    }
+    fb.branchUnsubs = newUnsubs;
+
+    // Subscribe to any newly needed branches not yet subscribed
+    needed.forEach(bid => {
+      if(fb.branchUnsubs[bid]) return;
+      _loadingBids.add(bid);
+      fb.branchUnsubs[bid] = onSnapshot(
+        collection(fb.db, BRANCHES[bid].collection),
+        (snap) => {
+          const fc = bid === st.branch ? capFocus() : null;
+          const u = {}; snap.forEach(d => { u[d.id] = d.data(); });
+          Object.keys(u).forEach(dk => {
+            if(briefingIsContaminated(u[dk], bid)) u[dk] = repairBriefing(u[dk], bid);
+          });
+          st.branchBriefings[bid] = u;
+          if(bid === st.branch) st.briefings = u;
+          idbSet(bid, u);
+          _loadingBids.delete(bid);
+          render();
+          if(fc) resFocus(fc);
+        },
+        (err) => {
+          _loadingBids.delete(bid);
+          console.error(`Snapshot error for ${bid}:`, err.code, err.message);
+        }
+      );
+    });
+    _lastSubBids = needed;
+
   });
-  _lastSubBids = needed;
 }
 
 function isActiveBranchLoading(){
@@ -841,6 +910,11 @@ function capFocus(){const el=document.activeElement;if(!el||(!(el.id)&&!el.datas
 function resFocus(f){if(!f)return;const el=f.id?document.getElementById(f.id):document.querySelector(`[data-ri="${f.ri}"][data-field="${f.field}"]`);if(el){el.value=f.value;el.focus();try{el.setSelectionRange(f.ss,f.se);}catch(e){}}}
 
 // ---- Stats ----
+function photoCompliance(photos, assets, missed){
+  const serviced=(parseInt(assets)||0)-(parseInt(missed)||0);
+  if(serviced<=0)return null;
+  return Math.round((parseInt(photos)||0)/serviced*100);
+}
 function bStats(b){
   const running=b.routes.filter(r=>r.status!=="off");
   const offCount=b.routes.length-running.length;
@@ -869,7 +943,9 @@ function bStats(b){
   const tEC=running.reduce((a,r)=>a+(parseInt(r.emptyCoils)||0),0);
   const tSpoils=running.reduce((a,r)=>a+(parseFloat(r.spoils)||0),0)+(b.spoilsShrinkOverflow?Object.values(b.spoilsShrinkOverflow).reduce((a,r)=>a+(parseFloat(r.spoils)||0),0):0);
   const tShrink=running.reduce((a,r)=>a+(parseFloat(r.shrink)||0),0)+(b.spoilsShrinkOverflow?Object.values(b.spoilsShrinkOverflow).reduce((a,r)=>a+(parseFloat(r.shrink)||0),0):0);
-  return{otPct,totalMissed:tM,totalMissedRestocks:tMR,totalEmptyCoils:tEC,totalSpoils:tSpoils,totalShrink:tShrink,pushed,totalAssets:tA,totalLocs:tL,active,late,out,finished,inProg,totes,hasTotes,avgSafety,minSafety,hasSafety,offCount,runningCount:running.length};
+  const tPhotos=running.reduce((a,r)=>a+(parseInt(r.photosTaken)||0),0);
+  const serviced=Math.max(0,(tA||0)-(tM||0));const photoComplPct=serviced>0?Math.round(tPhotos/serviced*100):null;
+  return{otPct,totalMissed:tM,totalMissedRestocks:tMR,totalEmptyCoils:tEC,totalSpoils:tSpoils,totalShrink:tShrink,totalPhotos:tPhotos,photoComplPct,pushed,totalAssets:tA,totalLocs:tL,active,late,out,finished,inProg,totes,hasTotes,avgSafety,minSafety,hasSafety,offCount,runningCount:running.length};
 }
 function isWeekend(dk){const[y,m,d]=dk.split("-");const w=new Date(+y,+m-1,+d).getDay();return w===0||w===6;}
 function calcRouteMinutes(start,finish){
@@ -936,7 +1012,7 @@ function collectTo(b){
     const i=parseInt(el.dataset.ri),k=el.dataset.field;
     if(!b.routes[i])return;
     if(el.tagName==="SELECT"&&(el.value==="__manual__"||el.value==="__manual2__"||el.value==="__clear__"))return;
-    if(k==="missed"||k==="assets"||k==="locations"||k==="missedRestocks"||k==="emptyCoils"||k==="spoils"||k==="shrink")b.routes[i][k]=el.value===""?"":(parseInt(el.value)||0);
+    if(k==="missed"||k==="assets"||k==="locations"||k==="missedRestocks"||k==="emptyCoils"||k==="spoils"||k==="shrink"||k==="photosTaken")b.routes[i][k]=el.value===""?"":(parseInt(el.value)||0);
     else if(k==="secondDriver"&&el.tagName==="INPUT")b.routes[i].secondDriver=el.value;
     else if(k==="thirdDriver"&&el.tagName==="INPUT")b.routes[i].thirdDriver=el.value;
     else if(k!=="secondDriver"&&k!=="thirdDriver")b.routes[i][k]=el.value;
@@ -1552,7 +1628,7 @@ window.downloadBudgetTemplate=function(){
 
 window.downloadImportTemplate=function(){
   const wb=XLSX.utils.book_new();
-  const hdr=["Date","Branch","Route","Today's Driver","2nd Driver","Driver Type","Attendance","Route Status","Assets Scheduled","Locations Scheduled","Missed Services","Missed Restocks","Empty Coils","Spoils","Shrink","Safety Score","Time Started","Time Finished","Pushed"];
+  const hdr=["Date","Branch","Route","Today's Driver","2nd Driver","Driver Type","Attendance","Route Status","Assets Scheduled","Locations Scheduled","Missed Services","Missed Restocks","Empty Coils","Photos Taken","Spoils","Shrink","Safety Score","Time Started","Time Finished","Pushed"];
   const notes=["YYYY-MM-DD","Austin/Dallas/Houston/Linthicum/Midland/San Antonio  (auto-detected from route prefix — column optional)","Route ID e.g. DFW701","Driver name","2nd driver name (optional)","assigned | relief | supervisor | trainee","On Time | Late | Call Out | NCNS | PTO | Open Route | No Route","Not Started | In Progress | Finished","Number","Number","Number","Number","Number","0–100","HH:MM 24-hr","HH:MM 24-hr","yes | no | na"];
   const example=["2026-05-24","Dallas","DFW701","Gambino Hernandez","","assigned","On Time","Finished",45,12,0,0,0,98.5,"07:30","16:15","no"];
   const ws=XLSX.utils.aoa_to_sheet([hdr,notes,example]);
@@ -1624,11 +1700,12 @@ window._importBulkXL=function(){
         const locs=numOr("Locations Scheduled")||numOr("Locations")||null;
         const missed=numOr("Missed Services")||numOr("Missed")||null;
         const safety=fltOr("Safety Score")||fltOr("Safety")||null;
+        const photos=numOr("Photos Taken")||numOr("Photos")||null;
         const status=ATT_REV[attRaw.toLowerCase()]||null;
         const routeStatus=RS_REV[rsRaw.toLowerCase()]||null;
-        const hasData=driver||assets!==null||locs!==null||missed!==null||safety!==null||status||routeStatus;
+        const hasData=driver||assets!==null||locs!==null||missed!==null||safety!==null||status||routeStatus||photos!==null;
         if(!hasData){skippedPrev++;return;}
-        preview.push({bid,dk,routeId,driver,status,routeStatus,assets,locs,missed,safety,isNew:!existingRoute,branchLabel:BRANCHES[bid].label});
+        preview.push({bid,dk,routeId,driver,status,routeStatus,assets,locs,missed,safety,photos,isNew:!existingRoute,branchLabel:BRANCHES[bid].label});
       });
 
       if(!preview.length){showToast("Nothing to import — all rows empty or unrecognized");return;}
@@ -1826,6 +1903,7 @@ window.confirmBulkImport=async function(){
         const m=numOr("Missed Services");if(m!==null)r.missed=m;
         const mr=numOr("Missed Restocks");if(mr!==null)r.missedRestocks=mr;
         const ec=numOr("Empty Coils");if(ec!==null)r.emptyCoils=ec;
+        const ph=numOr("Photos Taken")||numOr("Photos");if(ph!==null)r.photosTaken=ph;
         const sp=fltOr("Spoils");if(sp!==null)r.spoils=sp;
         const sh=fltOr("Shrink");if(sh!==null)r.shrink=sh;
         const sf=fltOr("Safety Score");if(sf!==null)r.safetyScore=String(sf);
@@ -2016,8 +2094,9 @@ function renderRoute(r,i){
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
         <div class="field"><label class="field-lbl">Safety score</label><input data-ri="${i}" data-field="safetyScore" type="number" min="0" max="100" step="0.1" value="${esc(r.safetyScore)}" oninput="onFI()" placeholder="—"></div>
-        <div class="field"><label class="field-lbl">Missed Restocks <span style="font-size:9px;font-weight:500;color:var(--text-3);text-transform:none;letter-spacing:0">(restock btn not pressed)</span></label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
+        <div class="field"><label class="field-lbl">Photos taken</label><input data-ri="${i}" data-field="photosTaken" type="number" min="0" value="${esc(r.photosTaken||0)}" oninput="onFI()" placeholder="0"></div>
         <div class="field"><label class="field-lbl">Empty coils</label><input data-ri="${i}" data-field="emptyCoils" type="number" min="0" value="${esc(r.emptyCoils||0)}" oninput="onFI()"></div>
+        <div class="field"><label class="field-lbl">Missed Restocks <span style="font-size:9px;font-weight:500;color:var(--text-3);text-transform:none;letter-spacing:0">(restock btn not pressed)</span></label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
         <div class="field"><label class="field-lbl">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
         <div class="field"><label class="field-lbl">Shrink ($)</label><input data-ri="${i}" data-field="shrink" type="number" min="0" step="0.01" value="${esc(r.shrink||0)}" oninput="onFI()" placeholder="0.00"></div>
       </div>
@@ -2108,6 +2187,16 @@ function renderRecapCard(){
     const restocks=parseInt(r.missedRestocks)||0;
     if(restocks>=RESTOCKS_THRESH){
       flags.push({level:"warn",icon:"ti-package-off",label:"Missed Restocks",detail:`${esc(name)} (${route})`,value:restocks+" restocks",sub:"meets or exceeds "+RESTOCKS_THRESH+" threshold"});
+    }
+
+    // Photo compliance
+    const photos=parseInt(r.photosTaken)||0;
+    const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
+    if(serviced>0){
+      const pct=Math.round(photos/serviced*100);
+      if(pct<95){
+        flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})`,value:pct+"% ("+photos+" of "+serviced+")",sub:"below 95% threshold"});
+      }
     }
   });
 
@@ -2259,6 +2348,7 @@ function renderSum(b,opts={}){
     <div class="kpi"><div class="kpi-lbl">Services Pushed</div><div class="kpi-val ${s.pushed===0?"kv-s":"kv-w"}">${s.pushed}</div>${prev?delta(s.pushed,prev.pushed,true):""}</div>
     <div class="kpi"><div class="kpi-lbl">Assets Scheduled</div><div class="kpi-val">${s.totalAssets||"—"}</div></div>
     <div class="kpi"><div class="kpi-lbl">Locations Scheduled</div><div class="kpi-val">${s.totalLocs||"—"}</div></div>
+    ${s.photoComplPct!==null?`<div class="kpi"><div class="kpi-lbl">Photo Compliance</div><div class="kpi-val ${s.photoComplPct>=95?"kv-s":s.photoComplPct>=80?"kv-w":"kv-d"}">${s.photoComplPct}%</div></div>`:""}
     <div class="kpi"><div class="kpi-lbl">Active Routes</div><div class="kpi-val">${s.active}</div></div>
   </div>
   ${flagBits.length?`<div class="alert-box"><div class="alert-title"><i class="ti ti-alert-triangle"></i> Flags</div>${flagBits.map(f=>`<div class="alert-item">• ${f}</div>`).join("")}</div>`:`<div class="ok-box"><i class="ti ti-circle-check"></i> No flags — clean day</div>`}
@@ -2589,19 +2679,21 @@ function aggregatePeriodStats(bid,dates){
   const tk=todayKey();
   // Exclude today — partial data skews everything
   const completedDates=dates.filter(d=>d<tk);
-  let tA=0,tM=0,tLate=0,tOut=0,tFin=0,tRun=0,tLocs=0,tMR=0,sfVals=[],revTotal=0,daysWithData=0,tSpoils=0,tShrink=0;
+  let tA=0,tM=0,tLate=0,tOut=0,tFin=0,tRun=0,tLocs=0,tMR=0,sfVals=[],revTotal=0,daysWithData=0,tSpoils=0,tShrink=0,tPhotos=0,tServiced=0;
   completedDates.forEach(dk=>{
     const b=brf[dk];if(!b||!b.routes)return;
     daysWithData++;const s=bStats(b);
     tA+=s.totalAssets;tM+=s.totalMissed;tLate+=s.late;tOut+=s.out;
     tFin+=s.finished;tRun+=s.runningCount;tLocs+=s.totalLocs;tMR+=s.totalMissedRestocks||0;
     tSpoils+=s.totalSpoils||0;tShrink+=s.totalShrink||0;
+    tPhotos+=s.totalPhotos||0;tServiced+=Math.max(0,(s.totalAssets||0)-(s.totalMissed||0));
     if(s.avgSafety!==null)sfVals.push(s.avgSafety);
     if(b.revenue||b.routes)revTotal+=getBranchDayRevenue(bid,dk);
   });
   const otPct=tA>0?Math.round(((tA-tM)/tA)*1000)/10:null;
   const avgSafety=sfVals.length?Math.round(sfVals.reduce((a,b)=>a+b,0)/sfVals.length*100)/100:null;
-  return{tA,tM,tLate,tOut,tFin,tRun,tLocs,tMR,otPct,avgSafety,revTotal,daysWithData,tSpoils,tShrink};
+  const photoCompl=tServiced>0?Math.round(tPhotos/tServiced*100):null;
+  return{tA,tM,tLate,tOut,tFin,tRun,tLocs,tMR,otPct,avgSafety,revTotal,daysWithData,tSpoils,tShrink,photoCompl};
 }
 
 function getPrevPeriodDates(period,currentDates){
@@ -2745,11 +2837,12 @@ function renderRollup(){
         <span style="font-size:14px;font-weight:600;color:${isActive?'var(--brand)':'inherit'}">${BRANCHES[bid].label}</span>
         ${period==='daily'?`<span class="status-badge ${BSBADGE[checkInStatus]}"><i class="ti ${RSI[checkInStatus]}" style="font-size:11px"></i> ${RSL[checkInStatus]}</span>`:`<span style="font-size:11px;color:var(--text-2)">${s.daysWithData} day${s.daysWithData===1?'':'s'} of data</span>`}
       </div>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">
+      <div style="display:grid;grid-template-columns:repeat(${s.photoCompl!==null?5:4},minmax(0,1fr));gap:6px">
         <div class="kpi"><div class="kpi-lbl">On-Time</div><div class="kpi-val" style="font-size:18px;color:${s.otPct===null?'inherit':s.otPct>=95?'var(--ok-text)':s.otPct>=85?'var(--warn-text)':'var(--danger-text)'}"> ${s.otPct===null?'—':s.otPct+'%'}</div></div>
         <div class="kpi"><div class="kpi-lbl">Safety</div><div class="kpi-val" style="font-size:18px;color:${s.avgSafety===null?'inherit':s.avgSafety>=95?'var(--ok-text)':s.avgSafety>=85?'var(--warn-text)':'var(--danger-text)'}"> ${s.avgSafety===null?'—':s.avgSafety}</div></div>
         <div class="kpi"><div class="kpi-lbl">Revenue</div><div class="kpi-val" style="font-size:${s.revTotal>0?'16':'18'}px;color:${s.revTotal>0?'var(--brand)':'var(--text-2)'}"> ${s.revTotal>0?fmtMoneyAbbr(s.revTotal):'—'}</div></div>
         <div class="kpi"><div class="kpi-lbl">Missed</div><div class="kpi-val" style="font-size:18px;color:${s.tM===0?'var(--ok-text)':s.tM<=2?'var(--warn-text)':'var(--danger-text)'}"> ${s.tM}</div></div>
+        ${s.photoCompl!==null?`<div class="kpi"><div class="kpi-lbl">Photo %</div><div class="kpi-val" style="font-size:18px;color:${s.photoCompl>=95?'var(--ok-text)':s.photoCompl>=80?'var(--warn-text)':'var(--danger-text)'}"> ${s.photoCompl}%</div></div>`:''}
       </div>
       ${(()=>{
         // % variance vs previous period for revenue, spoils, shrink
@@ -3322,12 +3415,26 @@ function renderNav(){
 }
 
 function renderSkeleton(){
+  const line=(w='80%',h=14)=>`<div class="shimmer skel-line" style="width:${w};height:${h}px"></div>`;
+  const pill=(w=80,h=26)=>`<div class="shimmer skel-rect" style="width:${w}px;height:${h}px;border-radius:20px"></div>`;
+  const kpi=()=>`<div style="background:var(--bg-2);border-radius:var(--radius-lg);padding:14px 8px;text-align:center;border:1px solid var(--border)">
+    ${line('50%',10)}<div class="shimmer skel-line" style="width:70%;height:24px;margin:4px auto 0"></div>
+  </div>`;
   return`<div style="padding:4px 0">
     ${branchPill()}
-    <div style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:80px 20px;color:var(--text-3)">
-      <i class="ti ti-loader-2" style="font-size:36px;animation:spin .8s linear infinite;color:var(--brand)"></i>
-      <div style="font-size:13px;font-weight:600;color:var(--text-2)">Loading ${BRANCHES[st.branch]?.label||"branch"} data…</div>
+    <!-- Ring + status bar -->
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+      <div class="shimmer skel-circle" style="width:72px;height:72px;flex-shrink:0"></div>
+      <div style="flex:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">${[1,2,3,4].map(kpi).join('')}</div>
     </div>
+    <!-- Status stepper -->
+    <div class="shimmer skel-rect" style="height:52px;margin-bottom:16px"></div>
+    <!-- Route cards -->
+    ${[1,2,3,4,5].map(()=>`<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);padding:13px 15px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+      <div class="shimmer skel-circle" style="width:10px;height:10px;flex-shrink:0"></div>
+      <div style="flex:1">${line('40%',10)}${line('65%',16)}</div>
+      ${pill()}
+    </div>`).join('')}
   </div>`;
 }
 
@@ -3499,7 +3606,7 @@ function getDriverStats(bid,days){
       const name=r.assignedDriver||r.driver;
       if(!name||!name.trim())return; // skip routes with no named driver
       const key=name;
-      if(!drivers[key])drivers[key]={name:key,route:r.id,days:0,assetsTotal:0,missedTotal:0,lateCount:0,safetyScores:[],absenceDays:0,unexcusedDays:0,revenueTotal:0,revDays:0,revWorkdays:0,revOffdays:0};
+      if(!drivers[key])drivers[key]={name:key,route:r.id,days:0,assetsTotal:0,missedTotal:0,lateCount:0,safetyScores:[],absenceDays:0,unexcusedDays:0,revenueTotal:0,revDays:0,revWorkdays:0,revOffdays:0,photosTotal:0,servicedTotal:0};
       const d=drivers[key];
       d.days++;
       if(ABSENCE.includes(r.status)){
@@ -3522,6 +3629,9 @@ function getDriverStats(bid,days){
           if(dow===0||dow===6)d.revOffdays++;else d.revWorkdays++;
         }
       }
+      // Photo compliance
+      const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
+      if(serviced>0){d.photosTotal+=(parseInt(r.photosTaken)||0);d.servicedTotal+=serviced;}
     });
   });
   return Object.values(drivers).map(d=>{
@@ -3533,7 +3643,8 @@ function getDriverStats(bid,days){
     // Trend: compare last half vs first half of period
     const avgRevenue=activeDays>0?Math.round(d.revenueTotal/activeDays):0;
     const avgDayType=d.revOffdays>d.revWorkdays?"off":"workday";
-    return{...d,activeDays,otPct,avgSafety,lateRate,avgMissed,avgRevenue,avgDayType,unexcusedDays:d.unexcusedDays||0};
+    const avgPhotoCompl=d.servicedTotal>0?Math.round(d.photosTotal/d.servicedTotal*100):null;
+    return{...d,activeDays,otPct,avgSafety,lateRate,avgMissed,avgRevenue,avgDayType,unexcusedDays:d.unexcusedDays||0,avgPhotoCompl};
   }).filter(d=>d.days>0).sort((a,b)=>{
     // Sort: drivers with data first, by OT% desc
     if(a.otPct===null&&b.otPct!==null)return 1;
@@ -3548,7 +3659,7 @@ const ROUTE_ANNUAL_TARGET=1000000;
 const ROUTE_WORKDAY_TARGET=Math.round(ROUTE_ANNUAL_TARGET*0.92/260); // ~$3,538
 const ROUTE_OFFDAY_TARGET=Math.round(ROUTE_ANNUAL_TARGET*0.08/105);  // ~$762
 
-function driverGrade(otPct,avgSafety,lateRate,avgMissed,absenceDays,activeDays,avgRevenue,avgDayType,unexcusedDays){
+function driverGrade(otPct,avgSafety,lateRate,avgMissed,absenceDays,activeDays,avgRevenue,avgDayType,unexcusedDays,avgPhotoCompl){
   if(otPct===null&&avgSafety===null)return{label:"N/A",cls:"",bg:""};
   let score=0;
 
@@ -3567,22 +3678,26 @@ function driverGrade(otPct,avgSafety,lateRate,avgMissed,absenceDays,activeDays,a
   else if(lateRate>10)score-=1;
 
   // Absences — Callout/NCNS only, PTO excused — scaled to annualized rate
-  // >3/year = neutral, >6/year = -2
   const unexcused=unexcusedDays||0;
-  const totalDays=(activeDays||(absenceDays||0)>0?activeDays+(absenceDays||0):1)||(1);
+  const totalDays=Math.max(1,activeDays+(absenceDays||0));
   const annualizedRate=unexcused/totalDays*365;
   if(unexcused===0)score+=2;
   else if(annualizedRate<=3)score+=2;
   else if(annualizedRate<=6)score+=0;
   else score-=2;
 
-  // Revenue vs daily target (max 2, min -1)
+  // Revenue vs daily target (max 1, min -1) — reduced weight
   if(avgRevenue>0){
     const target=avgDayType==="off"?ROUTE_OFFDAY_TARGET:ROUTE_WORKDAY_TARGET;
     const pct=avgRevenue/target*100;
-    if(pct>=110)score+=2;
-    else if(pct>=90)score+=1;
+    if(pct>=90)score+=1;
     else if(pct<75)score-=1;
+  }
+
+  // Photo compliance (max 1, min -1)
+  if(avgPhotoCompl!==null){
+    if(avgPhotoCompl>=95)score+=1;
+    else if(avgPhotoCompl<80)score-=1;
   }
 
   // Grade thresholds (max possible ~9)
@@ -3633,7 +3748,7 @@ function renderDrivers(){
     if(totalBranchRev>0)html2+='<div class="kpi" style="grid-column:1/-1"><div class="kpi-lbl">Total Revenue</div><div class="kpi-val" style="color:var(--brand)">'+fmtMoneyAbbr(totalBranchRev)+'</div></div>';
     html2+='</div>';
     drivers.forEach(function(d){
-      const grade=driverGrade(d.otPct,d.avgSafety,d.lateRate,d.avgMissed,d.absenceDays,d.activeDays,d.avgRevenue,d.avgDayType,d.unexcusedDays);
+      const grade=driverGrade(d.otPct,d.avgSafety,d.lateRate,d.avgMissed,d.absenceDays,d.activeDays,d.avgRevenue,d.avgDayType,d.unexcusedDays,d.avgPhotoCompl);
       const otCls=d.otPct===null?"":(d.otPct>=95?"kv-s":d.otPct>=85?"kv-w":"kv-d");
       const sfCls=d.avgSafety===null?"":(d.avgSafety>=95?"kv-s":d.avgSafety>=85?"kv-w":"kv-d");
       const flags=[];
@@ -3646,6 +3761,7 @@ function renderDrivers(){
         const target=d.avgDayType==="off"?ROUTE_OFFDAY_TARGET:ROUTE_WORKDAY_TARGET;
         if(d.avgRevenue/target<0.75)flags.push("Below revenue target");
       }
+      if(d.avgPhotoCompl!==null&&d.avgPhotoCompl<80)flags.push(`Low photo compliance (${d.avgPhotoCompl}%)`);
       const gradeColor=grade.cls==="kv-s"?"var(--ok-text)":grade.cls==="kv-w"?"var(--warn-text)":grade.cls==="kv-d"?"var(--danger-text)":"var(--text)";
       html2+='<div class="card" style="margin-bottom:10px">';
       html2+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
@@ -3655,13 +3771,16 @@ function renderDrivers(){
       html2+='<div style="font-size:22px;font-weight:800;color:'+gradeColor+';line-height:1">'+grade.label+'</div>';
       html2+='<div style="font-size:9px;color:var(--text-2);margin-top:2px;font-weight:700">GRADE</div></div></div>';
       const hasRev=d.avgRevenue>0;
-      const cols=hasRev?'repeat(5,minmax(0,1fr))':'repeat(4,minmax(0,1fr))';
+      const hasPhoto=d.avgPhotoCompl!==null;
+      const extraCols=(hasRev?1:0)+(hasPhoto?1:0);
+      const cols='repeat('+(4+extraCols)+',minmax(0,1fr))';
       html2+='<div style="display:grid;grid-template-columns:'+cols+';gap:6px;margin-bottom:'+(flags.length?'10':'0')+'px">';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">On-Time</div><div class="kpi-val '+otCls+'" style="font-size:17px">'+(d.otPct===null?"&mdash;":d.otPct+"%")+'</div></div>';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Safety</div><div class="kpi-val '+sfCls+'" style="font-size:17px">'+(d.avgSafety===null?"&mdash;":d.avgSafety)+'</div></div>';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Late Rate</div><div class="kpi-val '+(d.lateRate===0?"kv-s":d.lateRate<=10?"kv-w":"kv-d")+'" style="font-size:17px">'+d.lateRate+'%</div></div>';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Avg Missed</div><div class="kpi-val '+(d.avgMissed===0?"kv-s":d.avgMissed<=0.5?"kv-w":"kv-d")+'" style="font-size:17px">'+d.avgMissed+'</div></div>';
       if(hasRev)html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Avg Rev</div><div class="kpi-val" style="font-size:15px;color:var(--brand)">'+fmtMoneyAbbr(d.avgRevenue)+'</div></div>';
+      if(hasPhoto){const pc=d.avgPhotoCompl;html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Photo %</div><div class="kpi-val '+(pc>=95?"kv-s":pc>=80?"kv-w":"kv-d")+'" style="font-size:17px">'+pc+'%</div></div>';}
       html2+='</div>';
       if(flags.length){
         html2+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
@@ -3677,8 +3796,9 @@ function renderDrivers(){
       <div><strong style="color:var(--text)">On-Time %</strong></div><div>≥98% +3 · ≥95% +2 · ≥90% +1 · &lt;90% 0</div>
       <div><strong style="color:var(--text)">Safety Score</strong></div><div>≥95 avg +2 · ≥85 avg +1 · &lt;85 0</div>
       <div><strong style="color:var(--text)">Late Rate</strong></div><div>0% +1 · ≤10% 0 · &gt;10% −1</div>
-      <div><strong style="color:var(--text)">Absences</strong></div><div>Callout/NCNS only (PTO excused) · 0 or ≤3/yr rate +2 · ≤6/yr rate 0 · &gt;6/yr rate −2</div>
-      <div><strong style="color:var(--text)">Revenue vs Target</strong></div><div>≥110% +2 · ≥90% +1 · ≥75% 0 · &lt;75% −1</div>
+      <div><strong style="color:var(--text)">Absences (Callout/NCNS)</strong></div><div>PTO excused · 0 or ≤3/yr rate +2 · ≤6/yr rate 0 · &gt;6/yr rate −2</div>
+      <div><strong style="color:var(--text)">Revenue vs Target</strong></div><div>≥90% +1 · ≥75% 0 · &lt;75% −1 (reduced weight)</div>
+      <div><strong style="color:var(--text)">Photo Compliance</strong></div><div>≥95% +1 · ≥80% 0 · &lt;80% −1</div>
     </div>
     <div style="font-size:11px;color:var(--text-3);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);line-height:1.7">
       <strong style="color:var(--text-2)">Grade thresholds:</strong> A ≥8 pts · B ≥6 pts · C ≥4 pts · D &lt;4 pts<br>
