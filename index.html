@@ -2194,8 +2194,8 @@ function renderRecapCard(){
     const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
     if(serviced>0){
       const pct=Math.round(photos/serviced*100);
-      if(pct<95){
-        flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})`,value:pct+"% ("+photos+" of "+serviced+")",sub:"below 95% threshold"});
+      if(pct<90){
+        flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})`,value:pct+"% ("+photos+" of "+serviced+")",sub:"below 90% threshold"});
       }
     }
   });
@@ -2248,8 +2248,7 @@ function renderEntry(){
   const inProg=b.routes.filter(r=>!r.isAdHoc&&r.routeStatus==="in_progress").length;
   const notStart=b.routes.filter(r=>!r.isAdHoc&&r.routeStatus==="not_started"&&r.status!=="off").length;
   const total=b.routes.filter(r=>!r.isAdHoc&&r.status!=="off").length;
-  const migrationBanner=`<div style="background:var(--warn-bg);border:1px solid var(--warn-border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--warn-text);line-height:1.6;display:flex;align-items:flex-start;gap:8px"><i class="ti ti-alert-circle" style="font-size:16px;flex-shrink:0;margin-top:1px"></i><span>Please migrate to the new link at <a href="https://inreach-checkin.github.io/daily-checkin/" target="_blank" style="color:var(--warn-text);font-weight:700;text-decoration:underline">https://inreach-checkin.github.io/daily-checkin/</a></span></div>`;
-  return`${migrationBanner}<div class="app-header"><div style="display:flex;align-items:center;gap:10px"><img src="icon.png" class="app-logo" alt=""><div><div class="app-title">${activeBranch().label} Daily Check-in</div><div class="app-sub">${isToday?"Today":fmtDN(sk)+", "+fmtS(sk)} ${syncPill()}</div></div></div>
+  return`<div class="app-header"><div style="display:flex;align-items:center;gap:10px"><img src="icon.png" class="app-logo" alt=""><div><div class="app-title">${activeBranch().label} Daily Check-in</div><div class="app-sub">${isToday?"Today":fmtDN(sk)+", "+fmtS(sk)} ${syncPill()}</div></div></div>
   <div style="display:flex;align-items:center;gap:4px">
     <button onclick="prevDay()" style="padding:6px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text);font-size:16px;min-height:36px;display:flex;align-items:center;justify-content:center"><i class="ti ti-chevron-left" style="font-size:16px"></i></button>
     <span class="date-badge" style="font-weight:500;cursor:${!isToday?'pointer':''}" onclick="${!isToday?'jumpToday()':''}" title="${!isToday?'Tap to go to today':''}">${fmtS(sk)}${isToday?' ·  Today':''}</span>
@@ -2837,11 +2836,14 @@ function renderRollup(){
         <span style="font-size:14px;font-weight:600;color:${isActive?'var(--brand)':'inherit'}">${BRANCHES[bid].label}</span>
         ${period==='daily'?`<span class="status-badge ${BSBADGE[checkInStatus]}"><i class="ti ${RSI[checkInStatus]}" style="font-size:11px"></i> ${RSL[checkInStatus]}</span>`:`<span style="font-size:11px;color:var(--text-2)">${s.daysWithData} day${s.daysWithData===1?'':'s'} of data</span>`}
       </div>
-      <div style="display:grid;grid-template-columns:repeat(${s.photoCompl!==null?5:4},minmax(0,1fr));gap:6px">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:6px">
         <div class="kpi"><div class="kpi-lbl">On-Time</div><div class="kpi-val" style="font-size:18px;color:${s.otPct===null?'inherit':s.otPct>=95?'var(--ok-text)':s.otPct>=85?'var(--warn-text)':'var(--danger-text)'}"> ${s.otPct===null?'—':s.otPct+'%'}</div></div>
         <div class="kpi"><div class="kpi-lbl">Safety</div><div class="kpi-val" style="font-size:18px;color:${s.avgSafety===null?'inherit':s.avgSafety>=95?'var(--ok-text)':s.avgSafety>=85?'var(--warn-text)':'var(--danger-text)'}"> ${s.avgSafety===null?'—':s.avgSafety}</div></div>
         <div class="kpi"><div class="kpi-lbl">Revenue</div><div class="kpi-val" style="font-size:${s.revTotal>0?'16':'18'}px;color:${s.revTotal>0?'var(--brand)':'var(--text-2)'}"> ${s.revTotal>0?fmtMoneyAbbr(s.revTotal):'—'}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(${s.photoCompl!==null?3:2},minmax(0,1fr));gap:6px;margin-bottom:8px">
         <div class="kpi"><div class="kpi-lbl">Missed</div><div class="kpi-val" style="font-size:18px;color:${s.tM===0?'var(--ok-text)':s.tM<=2?'var(--warn-text)':'var(--danger-text)'}"> ${s.tM}</div></div>
+        <div class="kpi"><div class="kpi-lbl">Active Routes</div><div class="kpi-val" style="font-size:18px"> ${s.tRun||'—'}</div></div>
         ${s.photoCompl!==null?`<div class="kpi"><div class="kpi-lbl">Photo %</div><div class="kpi-val" style="font-size:18px;color:${s.photoCompl>=95?'var(--ok-text)':s.photoCompl>=80?'var(--warn-text)':'var(--danger-text)'}"> ${s.photoCompl}%</div></div>`:''}
       </div>
       ${(()=>{
@@ -3696,7 +3698,7 @@ function driverGrade(otPct,avgSafety,lateRate,avgMissed,absenceDays,activeDays,a
 
   // Photo compliance (max 1, min -1)
   if(avgPhotoCompl!==null){
-    if(avgPhotoCompl>=95)score+=1;
+    if(avgPhotoCompl>=90)score+=1;
     else if(avgPhotoCompl<80)score-=1;
   }
 
@@ -3772,16 +3774,19 @@ function renderDrivers(){
       html2+='<div style="font-size:9px;color:var(--text-2);margin-top:2px;font-weight:700">GRADE</div></div></div>';
       const hasRev=d.avgRevenue>0;
       const hasPhoto=d.avgPhotoCompl!==null;
-      const extraCols=(hasRev?1:0)+(hasPhoto?1:0);
-      const cols='repeat('+(4+extraCols)+',minmax(0,1fr))';
-      html2+='<div style="display:grid;grid-template-columns:'+cols+';gap:6px;margin-bottom:'+(flags.length?'10':'0')+'px">';
+      // Row 1: core performance (always 3-col)
+      html2+='<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:6px">';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">On-Time</div><div class="kpi-val '+otCls+'" style="font-size:17px">'+(d.otPct===null?"&mdash;":d.otPct+"%")+'</div></div>';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Safety</div><div class="kpi-val '+sfCls+'" style="font-size:17px">'+(d.avgSafety===null?"&mdash;":d.avgSafety)+'</div></div>';
       html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Late Rate</div><div class="kpi-val '+(d.lateRate===0?"kv-s":d.lateRate<=10?"kv-w":"kv-d")+'" style="font-size:17px">'+d.lateRate+'%</div></div>';
-      html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Avg Missed</div><div class="kpi-val '+(d.avgMissed===0?"kv-s":d.avgMissed<=0.5?"kv-w":"kv-d")+'" style="font-size:17px">'+d.avgMissed+'</div></div>';
-      if(hasRev)html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Avg Rev</div><div class="kpi-val" style="font-size:15px;color:var(--brand)">'+fmtMoneyAbbr(d.avgRevenue)+'</div></div>';
-      if(hasPhoto){const pc=d.avgPhotoCompl;html2+='<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Photo %</div><div class="kpi-val '+(pc>=95?"kv-s":pc>=80?"kv-w":"kv-d")+'" style="font-size:17px">'+pc+'%</div></div>';}
       html2+='</div>';
+      // Row 2: secondary stats (only shown if data exists, max 3-col)
+      const row2=[];
+      row2.push('<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Avg Missed</div><div class="kpi-val '+(d.avgMissed===0?"kv-s":d.avgMissed<=0.5?"kv-w":"kv-d")+'" style="font-size:17px">'+d.avgMissed+'</div></div>');
+      if(hasRev)row2.push('<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Avg Rev</div><div class="kpi-val" style="font-size:15px;color:var(--brand)">'+fmtMoneyAbbr(d.avgRevenue)+'</div></div>');
+      if(hasPhoto){const pc=d.avgPhotoCompl;row2.push('<div class="kpi" style="padding:8px 4px"><div class="kpi-lbl">Photo %</div><div class="kpi-val '+(pc>=95?"kv-s":pc>=80?"kv-w":"kv-d")+'" style="font-size:17px">'+pc+'%</div></div>');}
+      if(row2.length)html2+='<div style="display:grid;grid-template-columns:repeat('+Math.min(row2.length,3)+',minmax(0,1fr));gap:6px;margin-bottom:'+(flags.length?'10':'0')+'px">'+row2.join('')+'</div>';
+      else html2+='<div style="margin-bottom:'+(flags.length?'10':'0')+'px"></div>';
       if(flags.length){
         html2+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
         flags.forEach(function(f){html2+='<span style="font-size:10px;padding:2px 8px;border-radius:12px;background:var(--danger-bg);color:var(--danger-text);font-weight:600">&#9888; '+f+'</span>';});
@@ -3798,7 +3803,7 @@ function renderDrivers(){
       <div><strong style="color:var(--text)">Late Rate</strong></div><div>0% +1 · ≤10% 0 · &gt;10% −1</div>
       <div><strong style="color:var(--text)">Absences (Callout/NCNS)</strong></div><div>PTO excused · 0 or ≤3/yr rate +2 · ≤6/yr rate 0 · &gt;6/yr rate −2</div>
       <div><strong style="color:var(--text)">Revenue vs Target</strong></div><div>≥90% +1 · ≥75% 0 · &lt;75% −1 (reduced weight)</div>
-      <div><strong style="color:var(--text)">Photo Compliance</strong></div><div>≥95% +1 · ≥80% 0 · &lt;80% −1</div>
+      <div><strong style="color:var(--text)">Photo Compliance</strong></div><div>≥90% +1 · ≥80% 0 · &lt;80% −1</div>
     </div>
     <div style="font-size:11px;color:var(--text-3);margin-top:10px;padding-top:10px;border-top:1px solid var(--border);line-height:1.7">
       <strong style="color:var(--text-2)">Grade thresholds:</strong> A ≥8 pts · B ≥6 pts · C ≥4 pts · D &lt;4 pts<br>
@@ -4174,11 +4179,12 @@ document.addEventListener('keydown',e=>{
 
 // ---- Auto-finish all routes at end of day ----
 function autoFinishDay(){
-  const tk=todayKey();
+  // At midnight, the day that just ENDED is yesterday — use yesterdayKey()
+  const yk=yesterdayKey();
   let anyChange=false;
   BRANCH_IDS.forEach(bid=>{
     const brf=st.branchBriefings[bid]||{};
-    const b=brf[tk];
+    const b=brf[yk];
     if(!b||!b.routes)return;
     b.routes.forEach(r=>{
       if(r.status!=='off'&&r.routeStatus!=='finished'){
