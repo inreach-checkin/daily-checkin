@@ -804,6 +804,7 @@ async function warmCacheFromIDB(bids){
       if(bid===st.branch){st.briefings=cached;}
     }
   }));
+  sweepStaleDays(); // close any past days still marked in_progress
   render(); // show cached data immediately
 }
 
@@ -861,6 +862,7 @@ function subNeededBranches(){
           if(bid === st.branch) st.briefings = u;
           idbSet(bid, u);
           _loadingBids.delete(bid);
+          sweepStaleDays();
           render();
           if(fc) resFocus(fc);
         },
@@ -1210,7 +1212,8 @@ window.setRollupDate=function(dk){st.rollupDate=dk;render();};
 window.prevRollupDay=function(){const d=new Date((st.rollupDate||todayKey())+"T12:00:00");d.setDate(d.getDate()-1);st.rollupDate=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");render();};
 window.nextRollupDay=function(){const d=new Date((st.rollupDate||todayKey())+"T12:00:00");d.setDate(d.getDate()+1);st.rollupDate=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");render();};
 window.markAllOff=function(){const b=ensureToday();collectTo(b);b.routes.forEach(r=>{r.status="off";});qW(b);render();};
-window.setBS=function(s){const b=ensureToday();collectTo(b);b.checkInStatus=s;if(s==="finished"&&!b.published){b.published=true;b.publishedAt=new Date().toISOString();}qW(b);render();};
+window.setBS=function(s){const b=ensureToday();collectTo(b);b.checkInStatus=s;if(s==="finished"){b.published=true;b.publishedAt=new Date().toISOString();// Auto-dismiss recap card when day is closed out
+try{localStorage.setItem(recapDismissKey(),todayKey());}catch(e){}st.recapDismissed=todayKey();}qW(b);render();};
 window.genBriefing=function(){const b=ensureToday();collectTo(b);b.published=true;b.publishedAt=new Date().toISOString();b.checkInStatus="finished";qW(b);st.todayView="summary";st.openIdx=null;render();showToast("Briefing published");setTimeout(()=>checkAndNotify(b),1500);};
 window.goEdit=function(){st.todayView="entry";render();};
 window.newBriefing=function(){
@@ -2283,7 +2286,7 @@ function renderEntry(){
     </div>`;
   })()}
   ${stepperHTML(b.checkInStatus,true)}
-  ${isToday&&b.checkInStatus==="not_started"?renderRecapCard():""}
+  ${isToday&&b.checkInStatus!=="finished"?renderRecapCard():""}
   <div class="section">
     <span class="section-lbl">Coverage notes (optional)</span>
     <div class="card"><div class="field"><label class="field-lbl">Free-form coverage notes</label><textarea id="f-coverage" oninput="onFI()" placeholder="e.g. Mike-assist 793, Rich-assist 709...">${esc(b.plan.coverageNotes)}</textarea></div></div>
@@ -4188,10 +4191,10 @@ function autoFinishDay(){
     if(!b||!b.routes)return;
     b.routes.forEach(r=>{
       if(r.status!=='off'&&r.routeStatus!=='finished'){
-        r.routeStatus='finished';
-        anyChange=true;
+        r.routeStatus='finished';anyChange=true;
       }
     });
+    if(b.checkInStatus!=='finished'){b.checkInStatus='finished';b.published=true;anyChange=true;}
     if(anyChange){
       try{localStorage.setItem(BRANCHES[bid].storeKey,JSON.stringify(brf));}catch(e){}
       if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
@@ -4202,8 +4205,40 @@ function autoFinishDay(){
     render();
     showToast('Day ended — all routes marked finished');
   }
-  // Schedule next midnight check
   scheduleMidnightFinish();
+}
+
+// Sweep past briefings on load — mark any past day still showing in_progress as finished
+function sweepStaleDays(){
+  const tk=todayKey();
+  let swept=0;
+  BRANCH_IDS.forEach(bid=>{
+    const brf=st.branchBriefings[bid]||{};
+    let changed=false;
+    Object.entries(brf).forEach(([dk,b])=>{
+      if(dk>=tk||!b||!b.routes)return; // skip today and future
+      let dayChanged=false;
+      b.routes.forEach(r=>{
+        if(r.status!=='off'&&r.routeStatus!=='finished'){
+          r.routeStatus='finished';dayChanged=true;
+        }
+      });
+      if(b.checkInStatus&&b.checkInStatus!=='finished'){
+        b.checkInStatus='finished';b.published=true;dayChanged=true;
+      }
+      if(dayChanged){
+        swept++;changed=true;
+        if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
+      }
+    });
+    if(changed){
+      try{localStorage.setItem(BRANCHES[bid].storeKey,JSON.stringify(brf));}catch(e){}
+    }
+  });
+  if(swept>0){
+    if(st.branch)st.briefings=st.branchBriefings[st.branch]||{};
+    console.log(`sweepStaleDays: closed ${swept} past briefing(s)`);
+  }
 }
 
 function scheduleMidnightFinish(){
