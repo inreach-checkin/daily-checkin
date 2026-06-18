@@ -919,34 +919,37 @@ function photoCompliance(photos, assets, missed){
 function bStats(b){
   const running=b.routes.filter(r=>r.status!=="off");
   const offCount=b.routes.length-running.length;
+  // Named (permanent) routes only — used for counts/grades visible to managers
+  const named=running.filter(r=>!r.isAdHoc);
+  // All running routes — used for operational totals (assets, missed, spoils etc.)
   const tA=running.reduce((a,r)=>a+(parseInt(r.assets)||0),0);
   const tM=running.reduce((a,r)=>a+(parseInt(r.missed)||0),0);
   const otPct=tA>0?Math.round(((tA-tM)/tA)*1000)/10:null;
-  const pushed=running.filter(r=>r.pushed==="yes").reduce((a,r)=>a+(parseInt(r.missed)||0),0);
+  const pushed=named.filter(r=>r.pushed==="yes").reduce((a,r)=>a+(parseInt(r.missed)||0),0);
   const tL=running.reduce((a,r)=>a+(parseInt(r.locations)||0),0);
-  const active=running.length;
-  const late=running.filter(r=>r.status==="no").length;
-  const out=running.filter(r=>ABSENCE.includes(r.status)).length;
-  const finished=running.filter(r=>r.routeStatus==="finished").length;
-  const inProg=running.filter(r=>r.routeStatus==="in_progress").length;
+  const active=named.length;
+  const late=named.filter(r=>r.status==="no").length;
+  const out=named.filter(r=>ABSENCE.includes(r.status)).length;
+  const finished=named.filter(r=>r.routeStatus==="finished").length;
+  const inProg=named.filter(r=>r.routeStatus==="in_progress").length;
   const totes={
-    candy:running.filter(r=>r.totes&&r.totes.candy==="yes").length,
-    freezer:running.filter(r=>r.totes&&r.totes.freezer==="yes").length,
-    cooler:running.filter(r=>r.totes&&r.totes.cooler==="yes").length,
-    dock:running.filter(r=>r.totes&&r.totes.dock==="yes").length,
+    candy:named.filter(r=>r.totes&&r.totes.candy==="yes").length,
+    freezer:named.filter(r=>r.totes&&r.totes.freezer==="yes").length,
+    cooler:named.filter(r=>r.totes&&r.totes.cooler==="yes").length,
+    dock:named.filter(r=>r.totes&&r.totes.dock==="yes").length,
   };
   const hasTotes=Object.values(totes).some(v=>v>0);
-  const scores=running.map(r=>parseFloat(r.safetyScore)).filter(v=>!isNaN(v)&&v>0);
+  const scores=named.map(r=>parseFloat(r.safetyScore)).filter(v=>!isNaN(v)&&v>0);
   const avgSafety=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length*100)/100:null;
   const minSafety=scores.length?Math.min(...scores):null;
   const hasSafety=scores.length>0;
-  const tMR=running.reduce((a,r)=>a+(parseInt(r.missedRestocks)||0),0);
-  const tEC=running.reduce((a,r)=>a+(parseInt(r.emptyCoils)||0),0);
+  const tMR=named.reduce((a,r)=>a+(parseInt(r.missedRestocks)||0),0);
+  const tEC=named.reduce((a,r)=>a+(parseInt(r.emptyCoils)||0),0);
   const tSpoils=running.reduce((a,r)=>a+(parseFloat(r.spoils)||0),0)+(b.spoilsShrinkOverflow?Object.values(b.spoilsShrinkOverflow).reduce((a,r)=>a+(parseFloat(r.spoils)||0),0):0);
   const tShrink=running.reduce((a,r)=>a+(parseFloat(r.shrink)||0),0)+(b.spoilsShrinkOverflow?Object.values(b.spoilsShrinkOverflow).reduce((a,r)=>a+(parseFloat(r.shrink)||0),0):0);
-  const tPhotos=running.reduce((a,r)=>a+(parseInt(r.photosTaken)||0),0);
+  const tPhotos=named.reduce((a,r)=>a+(parseInt(r.photosTaken)||0),0);
   const serviced=Math.max(0,(tA||0)-(tM||0));const photoComplPct=serviced>0?Math.round(tPhotos/serviced*100):null;
-  return{otPct,totalMissed:tM,totalMissedRestocks:tMR,totalEmptyCoils:tEC,totalSpoils:tSpoils,totalShrink:tShrink,totalPhotos:tPhotos,photoComplPct,pushed,totalAssets:tA,totalLocs:tL,active,late,out,finished,inProg,totes,hasTotes,avgSafety,minSafety,hasSafety,offCount,runningCount:running.length};
+  return{otPct,totalMissed:tM,totalMissedRestocks:tMR,totalEmptyCoils:tEC,totalSpoils:tSpoils,totalShrink:tShrink,totalPhotos:tPhotos,photoComplPct,pushed,totalAssets:tA,totalLocs:tL,active,late,out,finished,inProg,totes,hasTotes,avgSafety,minSafety,hasSafety,offCount,runningCount:named.length};
 }
 function isWeekend(dk){const[y,m,d]=dk.split("-");const w=new Date(+y,+m-1,+d).getDay();return w===0||w===6;}
 function calcRouteMinutes(start,finish){
