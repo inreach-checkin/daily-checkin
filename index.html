@@ -804,8 +804,7 @@ async function warmCacheFromIDB(bids){
       if(bid===st.branch){st.briefings=cached;}
     }
   }));
-  sweepStaleDays(); // close any past days still marked in_progress
-  render(); // show cached data immediately
+  render(); // show cached data immediately — sweep happens after fresh Firestore snapshot
 }
 
 // ---- Lazy subscription system ----
@@ -862,7 +861,7 @@ function subNeededBranches(){
           if(bid === st.branch) st.briefings = u;
           idbSet(bid, u);
           _loadingBids.delete(bid);
-          sweepStaleDays();
+          sweepBranchStaleDays(bid, u); // safe — data is fresh from Firestore
           render();
           if(fc) resFocus(fc);
         },
@@ -4182,21 +4181,23 @@ document.addEventListener('keydown',e=>{
 
 // ---- Auto-finish all routes at end of day ----
 function autoFinishDay(){
-  // At midnight, the day that just ENDED is yesterday — use yesterdayKey()
+  // At midnight, finish the day that just ended (yesterdayKey)
+  // Only write branches whose data came from Firestore — use branchUnsubs as proxy
   const yk=yesterdayKey();
   let anyChange=false;
-  BRANCH_IDS.forEach(bid=>{
+  const subscribedBids=Object.keys(fb.branchUnsubs||{});
+  const bidsToProcess=subscribedBids.length?subscribedBids:BRANCH_IDS;
+  bidsToProcess.forEach(bid=>{
     const brf=st.branchBriefings[bid]||{};
     const b=brf[yk];
     if(!b||!b.routes)return;
+    let dayChanged=false;
     b.routes.forEach(r=>{
-      if(r.status!=='off'&&r.routeStatus!=='finished'){
-        r.routeStatus='finished';anyChange=true;
-      }
+      if(r.status!=='off'&&r.routeStatus!=='finished'){r.routeStatus='finished';dayChanged=true;}
     });
-    if(b.checkInStatus!=='finished'){b.checkInStatus='finished';b.published=true;anyChange=true;}
-    if(anyChange){
-      try{localStorage.setItem(BRANCHES[bid].storeKey,JSON.stringify(brf));}catch(e){}
+    if(b.checkInStatus!=='finished'){b.checkInStatus='finished';b.published=true;dayChanged=true;}
+    if(dayChanged){
+      anyChange=true;
       if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
     }
   });
@@ -4208,37 +4209,27 @@ function autoFinishDay(){
   scheduleMidnightFinish();
 }
 
-// Sweep past briefings on load — mark any past day still showing in_progress as finished
-function sweepStaleDays(){
+// Sweep stale days for a SPECIFIC branch — only called after fresh Firestore snapshot
+// Never call this on IDB-cached data (could overwrite newer Firestore imports)
+function sweepBranchStaleDays(bid, brf){
   const tk=todayKey();
-  let swept=0;
-  BRANCH_IDS.forEach(bid=>{
-    const brf=st.branchBriefings[bid]||{};
-    let changed=false;
-    Object.entries(brf).forEach(([dk,b])=>{
-      if(dk>=tk||!b||!b.routes)return; // skip today and future
-      let dayChanged=false;
-      b.routes.forEach(r=>{
-        if(r.status!=='off'&&r.routeStatus!=='finished'){
-          r.routeStatus='finished';dayChanged=true;
-        }
-      });
-      if(b.checkInStatus&&b.checkInStatus!=='finished'){
-        b.checkInStatus='finished';b.published=true;dayChanged=true;
-      }
-      if(dayChanged){
-        swept++;changed=true;
-        if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
-      }
+  let changed=false;
+  Object.entries(brf).forEach(([dk,b])=>{
+    if(dk>=tk||!b||!b.routes)return;
+    let dayChanged=false;
+    b.routes.forEach(r=>{
+      if(r.status!=='off'&&r.routeStatus!=='finished'){r.routeStatus='finished';dayChanged=true;}
     });
-    if(changed){
-      try{localStorage.setItem(BRANCHES[bid].storeKey,JSON.stringify(brf));}catch(e){}
+    if(b.checkInStatus&&b.checkInStatus!=='finished'){
+      b.checkInStatus='finished';b.published=true;dayChanged=true;
+    }
+    if(dayChanged){
+      changed=true;
+      // Safe to write — data came directly from Firestore snapshot
+      if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
     }
   });
-  if(swept>0){
-    if(st.branch)st.briefings=st.branchBriefings[st.branch]||{};
-    console.log(`sweepStaleDays: closed ${swept} past briefing(s)`);
-  }
+  if(changed&&bid===st.branch)st.briefings=brf;
 }
 
 function scheduleMidnightFinish(){
