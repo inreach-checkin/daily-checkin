@@ -663,7 +663,7 @@ async function initFirebase(){
       fbUser=user;
       if(user){
         st.syncStatus="live";
-        subAll();subBudgets();loadPinHash();
+        subAll();subBudgets();loadPinHash();loadAnnouncement();
         render();
       } else {
         st.syncStatus="local";
@@ -1105,6 +1105,15 @@ window.onDriverSelect=function(i,val){
 window.toggleBranchPicker=function(e){e&&e.stopPropagation();st.branchPickerOpen=!st.branchPickerOpen;render();};
 window.closeBranchPicker=function(){if(st.branchPickerOpen){st.branchPickerOpen=false;render();}};
 
+function renderAnnouncementBanner(){
+  if(!_cachedAnnouncement||isAnnouncementDismissed())return"";
+  return`<div style="background:linear-gradient(135deg,var(--brand) 0%,#A8320B 100%);border-radius:var(--radius-lg);padding:13px 14px;margin-bottom:14px;box-shadow:0 3px 12px rgba(199,58,13,.25);display:flex;align-items:flex-start;gap:10px">
+    <i class="ti ti-speakerphone" style="font-size:18px;color:#fff;flex-shrink:0;margin-top:1px"></i>
+    <div style="flex:1;font-size:13px;color:#fff;line-height:1.5;font-weight:600">${esc(_cachedAnnouncement.text)}</div>
+    <button onclick="dismissAnnouncement()" style="flex-shrink:0;color:rgba(255,255,255,.85);padding:2px;background:none;border:none;cursor:pointer"><i class="ti ti-x" style="font-size:16px"></i></button>
+  </div>`;
+}
+
 function branchPill(){
   const recent=(st.recentBranches||[]).filter(b=>b!==st.branch).slice(0,4);
   const allSorted=[...BRANCH_IDS].sort((a,b)=>BRANCHES[a].label.localeCompare(BRANCHES[b].label));
@@ -1339,6 +1348,51 @@ function parseExcelTime(val){
 // ---- Import PIN protection (Firestore-backed, single shared PIN) ----
 const ADMIN_PIN_COLLECTION="dfw_notif_subs";
 const ADMIN_PIN_DOC="admin_pin";
+const ANNOUNCEMENT_DOC="announcement";
+let _cachedAnnouncement=null; // {text, ts, id}
+
+async function loadAnnouncement(){
+  if(!fb.modules||!fb.db)return;
+  try{
+    const{doc,getDoc}=fb.modules;
+    const snap=await getDoc(doc(fb.db,ADMIN_PIN_COLLECTION,ANNOUNCEMENT_DOC));
+    _cachedAnnouncement=snap.exists()?snap.data():null;
+    render();
+  }catch(e){console.warn("Could not load announcement:",e.message);}
+}
+
+async function saveAnnouncement(text){
+  if(!fb.modules||!fb.db)return false;
+  try{
+    const{doc,setDoc}=fb.modules;
+    const id=Date.now().toString(36); // unique id so dismissal resets on new message
+    const payload={text,ts:Date.now(),id};
+    await setDoc(doc(fb.db,ADMIN_PIN_COLLECTION,ANNOUNCEMENT_DOC),payload);
+    _cachedAnnouncement=payload;
+    return true;
+  }catch(e){console.warn("Could not save announcement:",e.message);return false;}
+}
+
+async function clearAnnouncementDoc(){
+  if(!fb.modules||!fb.db)return false;
+  try{
+    const{doc,deleteDoc}=fb.modules;
+    await deleteDoc(doc(fb.db,ADMIN_PIN_COLLECTION,ANNOUNCEMENT_DOC));
+    _cachedAnnouncement=null;
+    return true;
+  }catch(e){return false;}
+}
+
+function announcementDismissKey(){return`announce_dismissed_${fbUser?.uid||"anon"}`;}
+function isAnnouncementDismissed(){
+  if(!_cachedAnnouncement)return true;
+  try{return localStorage.getItem(announcementDismissKey())===_cachedAnnouncement.id;}catch(e){return false;}
+}
+window.dismissAnnouncement=function(){
+  if(!_cachedAnnouncement)return;
+  try{localStorage.setItem(announcementDismissKey(),_cachedAnnouncement.id);}catch(e){}
+  render();
+};
 let _cachedPinHash=null; // loaded from Firestore on init
 
 async function loadPinHash(){
@@ -1418,6 +1472,42 @@ window.submitPin=async function(){
       setTimeout(()=>{inp.style.borderColor="var(--border-2)";},800);
     }
   }
+};
+
+window.openAnnouncementEditor=function(){
+  const existing=document.getElementById("announce-modal");
+  if(existing)existing.remove();
+  const modal=document.createElement("div");
+  modal.id="announce-modal";
+  modal.style.cssText="position:fixed;inset:0;z-index:998;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.55);backdrop-filter:blur(4px)";
+  modal.innerHTML=`
+    <div style="background:var(--bg);border-radius:var(--radius-xl);padding:24px 22px;max-width:380px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.3);animation:popIn .3s cubic-bezier(.34,1.56,.64,1)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div style="width:40px;height:40px;border-radius:50%;background:var(--brand-light);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="ti ti-speakerphone" style="font-size:18px;color:var(--brand)"></i>
+        </div>
+        <div style="font-size:16px;font-weight:800;color:var(--text)">Announcement Banner</div>
+      </div>
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:12px;line-height:1.5">This message will appear at the top of the Today tab for every branch and every manager until you clear it.</div>
+      <textarea id="announce-input" placeholder="e.g. Reminder: submit timesheets by Friday EOD" style="width:100%;height:90px;border:1.5px solid var(--border-2);border-radius:var(--radius-md);padding:11px;font-size:14px;font-family:inherit;resize:none;background:var(--bg);color:var(--text)">${esc(_cachedAnnouncement?.text||"")}</textarea>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+        <button id="announce-save" onclick="submitAnnouncement()" style="background:var(--brand);color:#fff;border:none;border-radius:var(--radius-lg);padding:14px;font-size:14px;font-weight:800;cursor:pointer">Publish Banner</button>
+        <button onclick="document.getElementById('announce-modal').remove()" style="background:var(--bg-2);color:var(--text-2);border:1.5px solid var(--border-2);border-radius:var(--radius-lg);padding:13px;font-size:14px;font-weight:600;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById("announce-input")?.focus(),100);
+};
+
+window.submitAnnouncement=async function(){
+  const txt=(document.getElementById("announce-input")?.value||"").trim();
+  if(!txt){showToast("Enter a message first");return;}
+  const btn=document.getElementById("announce-save");
+  btn.textContent="Publishing…";btn.disabled=true;
+  const ok=await saveAnnouncement(txt);
+  document.getElementById("announce-modal")?.remove();
+  if(ok){showToast("Announcement published to all branches");render();}
+  else showToast("⚠ Could not publish — check connection");
 };
 
 window.changePinFlow=function(){
@@ -2259,6 +2349,7 @@ function renderEntry(){
     <span class="date-badge" style="font-weight:500;cursor:${!isToday?'pointer':''}" onclick="${!isToday?'jumpToday()':''}" title="${!isToday?'Tap to go to today':''}">${fmtS(sk)}${isToday?' ·  Today':''}</span>
     <button onclick="nextDay()" style="padding:6px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text);font-size:16px;min-height:36px;display:flex;align-items:center;justify-content:center"><i class="ti ti-chevron-right" style="font-size:16px"></i></button>
   </div></div>
+  ${isToday?renderAnnouncementBanner():""}
   ${branchPill()}
   ${(()=>{
     // Progress ring — routes finished / total
@@ -2627,7 +2718,15 @@ function renderSettings(){
   <div class="card" style="margin-bottom:14px">
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Saved briefings</div><div class="setting-desc">${count} day${count===1?"":"s"} in history for ${activeBranch().label}</div></div></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Export to Excel</div><div class="setting-desc">Daily summary · route details · driver stats (current branch)</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="exportXL()"><i class="ti ti-file-spreadsheet"></i> Excel</button></div>
-    <div class="setting-row"><div class="setting-info"><div class="setting-title">Import PIN</div><div class="setting-desc">${_cachedPinHash?"PIN set — revenue &amp; budget imports are admin-only.":"No PIN set — revenue &amp; budget imports are unprotected."}</div></div><div style="display:flex;gap:6px;flex-shrink:0">${_cachedPinHash?`<button class="btn-sec" style="font-size:12px;padding:7px 11px;min-height:36px" onclick="changePinFlow()"><i class="ti ti-refresh"></i> Change</button><button class="btn-sec btn-danger" style="font-size:12px;padding:7px 11px;min-height:36px" onclick="clearPin()"><i class="ti ti-lock-open"></i> Remove</button>`:`<button class="btn-sec" style="font-size:12px;padding:7px 11px;min-height:36px;background:var(--brand);color:#fff;border-color:var(--brand)" onclick="requirePin(()=>{showToast('Admin PIN set');render();})"><i class="ti ti-lock"></i> Set PIN</button>`}</div></div><div class="setting-row"><div class="setting-info"><div class="setting-title">Import Revenue from Excel</div><div class="setting-desc">Import per-route revenue (Vending/Market/OCS) by date, branch &amp; route ID. Leave Route blank for branch-level. <button onclick="downloadRevenueTemplate()" style="color:var(--blue);text-decoration:underline;font-size:inherit;padding:0;background:none;border:none;cursor:pointer">Template →</button></div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="importRevenueXL()"><i class="ti ti-table-import"></i> Import</button></div>
+    <div class="setting-row"><div class="setting-info"><div class="setting-title">Import PIN</div><div class="setting-desc">${_cachedPinHash?"PIN set — revenue &amp; budget imports are admin-only.":"No PIN set — revenue &amp; budget imports are unprotected."}</div></div><div style="display:flex;gap:6px;flex-shrink:0">${_cachedPinHash?`<button class="btn-sec" style="font-size:12px;padding:7px 11px;min-height:36px" onclick="changePinFlow()"><i class="ti ti-refresh"></i> Change</button><button class="btn-sec btn-danger" style="font-size:12px;padding:7px 11px;min-height:36px" onclick="clearPin()"><i class="ti ti-lock-open"></i> Remove</button>`:`<button class="btn-sec" style="font-size:12px;padding:7px 11px;min-height:36px;background:var(--brand);color:#fff;border-color:var(--brand)" onclick="requirePin(()=>{showToast('Admin PIN set');render();})"><i class="ti ti-lock"></i> Set PIN</button>`}</div></div>
+    <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div class="setting-info"><div class="setting-title">Announcement Banner</div><div class="setting-desc">${_cachedAnnouncement?"Live for all branches: \u201C"+esc(_cachedAnnouncement.text)+"\u201D":"No announcement currently set."} PIN required.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn-sec" style="flex:1;font-size:12px" onclick="requirePin(()=>openAnnouncementEditor())"><i class="ti ti-speakerphone"></i> ${_cachedAnnouncement?"Edit":"Set"} Banner</button>
+        ${_cachedAnnouncement?`<button class="btn-sec btn-danger" style="flex:0 0 auto;font-size:12px" onclick="requirePin(()=>{clearAnnouncementDoc().then(()=>{showToast('Announcement cleared');render();})})"><i class="ti ti-trash"></i></button>`:""}
+      </div>
+    </div>
+    <div class="setting-row"><div class="setting-info"><div class="setting-title">Import Revenue from Excel</div><div class="setting-desc">Import per-route revenue (Vending/Market/OCS) by date, branch &amp; route ID. Leave Route blank for branch-level. <button onclick="downloadRevenueTemplate()" style="color:var(--blue);text-decoration:underline;font-size:inherit;padding:0;background:none;border:none;cursor:pointer">Template →</button></div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="importRevenueXL()"><i class="ti ti-table-import"></i> Import</button></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Import Budgets from Excel</div><div class="setting-desc">Set monthly Vending/Market/OCS budgets per branch. <button onclick="downloadBudgetTemplate()" style="color:var(--blue);text-decoration:underline;font-size:inherit;padding:0;background:none;border:none;cursor:pointer">Template →</button></div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="importBudgetXL()"><i class="ti ti-table-import"></i> Import</button></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Export JSON backup</div><div class="setting-desc">Full data backup for current branch</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="exportJSON()"><i class="ti ti-download"></i> JSON</button></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Import JSON backup</div><div class="setting-desc">Restore from backup file</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="importJSON()"><i class="ti ti-upload"></i> Import</button></div>
