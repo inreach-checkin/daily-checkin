@@ -1745,6 +1745,33 @@ window._importBulkXL=function(){
       const rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{defval:""});
       if(!rows.length){showToast("No data found");return;}
 
+      // ---- Ensure every branch this import touches is actually loaded ----
+      // Lazy subscription only loads recent/active branches — branches outside
+      // that set would otherwise show up with {} briefings, causing every
+      // route to be misidentified as new/ad-hoc instead of matched correctly.
+      const touchedBids=new Set();
+      rows.forEach(row=>{
+        const routeId=String(row["Route"]||"").trim();
+        const bid=rowToBranch(row,routeId);
+        if(bid)touchedBids.add(bid);
+      });
+      const unloadedBids=[...touchedBids].filter(bid=>!st.branchBriefings[bid]||!Object.keys(st.branchBriefings[bid]).length);
+      if(unloadedBids.length&&fb.modules&&fb.db){
+        showToast(`Loading ${unloadedBids.length} branch${unloadedBids.length!==1?"es":""} before preview…`);
+        const{collection,getDocs}=fb.modules;
+        await Promise.all(unloadedBids.map(async bid=>{
+          try{
+            const snap=await getDocs(collection(fb.db,BRANCHES[bid].collection));
+            const u={};snap.forEach(d=>{u[d.id]=d.data();});
+            Object.keys(u).forEach(dk=>{
+              if(briefingIsContaminated(u[dk],bid))u[dk]=repairBriefing(u[dk],bid);
+            });
+            st.branchBriefings[bid]=u;
+            idbSet(bid,u);
+          }catch(err){console.error(`Failed to load ${bid} before import:`,err.message);}
+        }));
+      }
+
       // ---- PARSE PHASE — build preview, don't touch state ----
       const ATT_REV={};Object.entries(ATT_L).forEach(([k,v])=>{ATT_REV[v.toLowerCase()]=k;});
       const RS_REV={};Object.entries(RSL).forEach(([k,v])=>{RS_REV[v.toLowerCase()]=k;});
