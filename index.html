@@ -861,7 +861,12 @@ function subNeededBranches(){
           if(bid === st.branch) st.briefings = u;
           idbSet(bid, u);
           _loadingBids.delete(bid);
-          sweepBranchStaleDays(bid, u); // safe — data is fresh from Firestore
+          // CRITICAL: only sweep/write on server-confirmed data, never on local cache.
+          // Cache snapshots can be stale (e.g. device was offline during a recent
+          // import elsewhere) — writing them back would overwrite newer data.
+          if(!snap.metadata.fromCache){
+            sweepBranchStaleDays(bid, u);
+          }
           render();
           if(fc) resFocus(fc);
         },
@@ -4327,7 +4332,13 @@ function autoFinishDay(){
     if(b.checkInStatus!=='finished'){b.checkInStatus='finished';b.published=true;dayChanged=true;}
     if(dayChanged){
       anyChange=true;
-      if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
+      if(st.syncStatus==='live'&&fb.modules&&fb.db){
+        const{doc,updateDoc}=fb.modules;
+        updateDoc(doc(fb.db,BRANCHES[bid].collection,yk),{
+          routes:b.routes,checkInStatus:b.checkInStatus,published:b.published,
+          lastEditedAt:new Date().toISOString(),lastEditedBy:st.managerName||"(auto-finish)"
+        }).catch(()=>{});
+      }
     }
   });
   if(anyChange){
@@ -4354,8 +4365,16 @@ function sweepBranchStaleDays(bid, brf){
     }
     if(dayChanged){
       changed=true;
-      // Safe to write — data came directly from Firestore snapshot
-      if(st.syncStatus==='live'&&fb.modules&&fb.db)writeB(b,bid).catch(()=>{});
+      // Defense in depth: write ONLY the two fields that changed (routes, checkInStatus)
+      // rather than a full document overwrite, so this can never clobber other data
+      // even in an edge case the fromCache guard didn't catch.
+      if(st.syncStatus==='live'&&fb.modules&&fb.db){
+        const{doc,updateDoc}=fb.modules;
+        updateDoc(doc(fb.db,BRANCHES[bid].collection,dk),{
+          routes:b.routes,checkInStatus:b.checkInStatus,published:b.published,
+          lastEditedAt:new Date().toISOString(),lastEditedBy:st.managerName||"(auto-finish)"
+        }).catch(()=>{});
+      }
     }
   });
   if(changed&&bid===st.branch)st.briefings=brf;
