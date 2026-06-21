@@ -596,7 +596,7 @@ function ensureDate(dk){
   if(!st.briefings[dk])st.briefings[dk]=freshBriefing(dk);
   const b=st.briefings[dk];
   if(!b.checkInStatus)b.checkInStatus="not_started";
-  b.routes.forEach(r=>{if(!r.routeStatus)r.routeStatus="not_started";if(!r.totes)r.totes={candy:"no",freezer:"no",cooler:"no",dock:"no"};if(r.secondDriver===undefined)r.secondDriver="";if(r.thirdDriver===undefined)r.thirdDriver="";if(r.safetyScore===undefined)r.safetyScore="";if(r.missedRestocks===undefined)r.missedRestocks=0;if(r.emptyCoils===undefined)r.emptyCoils=0;if(r.spoils===undefined)r.spoils=0;if(r.shrink===undefined)r.shrink=0;if(r.timeStarted===undefined)r.timeStarted="";if(r.timeFinished===undefined)r.timeFinished="";if(!r.revenue)r.revenue={vending:"",market:"",ocs:""};if(r.photosTaken===undefined)r.photosTaken=0;});
+  b.routes.forEach(r=>{if(!r.routeStatus)r.routeStatus="not_started";if(!r.totes)r.totes={candy:"no",freezer:"no",cooler:"no",dock:"no"};if(r.secondDriver===undefined)r.secondDriver="";if(r.thirdDriver===undefined)r.thirdDriver="";if(r.safetyScore===undefined)r.safetyScore="";if(r.missedRestocks===undefined)r.missedRestocks=0;if(r.emptyCoils===undefined)r.emptyCoils=0;if(r.spoils===undefined)r.spoils=0;if(r.shrink===undefined)r.shrink=0;if(r.timeStarted===undefined)r.timeStarted="";if(r.timeFinished===undefined)r.timeFinished="";if(!r.revenue)r.revenue={vending:"",market:"",ocs:""};if(r.photosTaken===undefined&&r.assetsMissingPhotos===undefined)r.assetsMissingPhotos=0;});
   if(!b.revenue)b.revenue={vending:"",market:"",ocs:""};
   return b;
 }
@@ -916,10 +916,11 @@ function capFocus(){const el=document.activeElement;if(!el||(!(el.id)&&!el.datas
 function resFocus(f){if(!f)return;const el=f.id?document.getElementById(f.id):document.querySelector(`[data-ri="${f.ri}"][data-field="${f.field}"]`);if(el){el.value=f.value;el.focus();try{el.setSelectionRange(f.ss,f.se);}catch(e){}}}
 
 // ---- Stats ----
-function photoCompliance(photos, assets, missed){
+function photoCompliance(missingPhotos, assets, missed){
   const serviced=(parseInt(assets)||0)-(parseInt(missed)||0);
   if(serviced<=0)return null;
-  return Math.round((parseInt(photos)||0)/serviced*100);
+  const withPhotos=Math.max(0,serviced-(parseInt(missingPhotos)||0));
+  return Math.round(withPhotos/serviced*100);
 }
 function bStats(b){
   const running=b.routes.filter(r=>r.status!=="off");
@@ -952,9 +953,11 @@ function bStats(b){
   const tEC=named.reduce((a,r)=>a+(parseInt(r.emptyCoils)||0),0);
   const tSpoils=running.reduce((a,r)=>a+(parseFloat(r.spoils)||0),0)+(b.spoilsShrinkOverflow?Object.values(b.spoilsShrinkOverflow).reduce((a,r)=>a+(parseFloat(r.spoils)||0),0):0);
   const tShrink=running.reduce((a,r)=>a+(parseFloat(r.shrink)||0),0)+(b.spoilsShrinkOverflow?Object.values(b.spoilsShrinkOverflow).reduce((a,r)=>a+(parseFloat(r.shrink)||0),0):0);
-  const tPhotos=named.reduce((a,r)=>a+(parseInt(r.photosTaken)||0),0);
-  const serviced=Math.max(0,(tA||0)-(tM||0));const photoComplPct=serviced>0?Math.round(tPhotos/serviced*100):null;
-  return{otPct,totalMissed:tM,totalMissedRestocks:tMR,totalEmptyCoils:tEC,totalSpoils:tSpoils,totalShrink:tShrink,totalPhotos:tPhotos,photoComplPct,pushed,totalAssets:tA,totalLocs:tL,active,late,out,finished,inProg,totes,hasTotes,avgSafety,minSafety,hasSafety,offCount,runningCount:named.length};
+  const tMissingPhotos=named.reduce((a,r)=>a+(parseInt(r.assetsMissingPhotos)||0),0);
+  const serviced=Math.max(0,(tA||0)-(tM||0));
+  const tWithPhotos=Math.max(0,serviced-tMissingPhotos);
+  const photoComplPct=serviced>0?Math.round(tWithPhotos/serviced*100):null;
+  return{otPct,totalMissed:tM,totalMissedRestocks:tMR,totalEmptyCoils:tEC,totalSpoils:tSpoils,totalShrink:tShrink,totalMissingPhotos:tMissingPhotos,photoComplPct,pushed,totalAssets:tA,totalLocs:tL,active,late,out,finished,inProg,totes,hasTotes,avgSafety,minSafety,hasSafety,offCount,runningCount:named.length};
 }
 function isWeekend(dk){const[y,m,d]=dk.split("-");const w=new Date(+y,+m-1,+d).getDay();return w===0||w===6;}
 function calcRouteMinutes(start,finish){
@@ -1021,7 +1024,7 @@ function collectTo(b){
     const i=parseInt(el.dataset.ri),k=el.dataset.field;
     if(!b.routes[i])return;
     if(el.tagName==="SELECT"&&(el.value==="__manual__"||el.value==="__manual2__"||el.value==="__clear__"))return;
-    if(k==="missed"||k==="assets"||k==="locations"||k==="missedRestocks"||k==="emptyCoils"||k==="spoils"||k==="shrink"||k==="photosTaken")b.routes[i][k]=el.value===""?"":(parseInt(el.value)||0);
+    if(k==="missed"||k==="assets"||k==="locations"||k==="missedRestocks"||k==="emptyCoils"||k==="spoils"||k==="shrink"||k==="assetsMissingPhotos")b.routes[i][k]=el.value===""?"":(parseInt(el.value)||0);
     else if(k==="secondDriver"&&el.tagName==="INPUT")b.routes[i].secondDriver=el.value;
     else if(k==="thirdDriver"&&el.tagName==="INPUT")b.routes[i].thirdDriver=el.value;
     else if(k!=="secondDriver"&&k!=="thirdDriver")b.routes[i][k]=el.value;
@@ -1728,7 +1731,7 @@ window.downloadBudgetTemplate=function(){
 
 window.downloadImportTemplate=function(){
   const wb=XLSX.utils.book_new();
-  const hdr=["Date","Branch","Route","Today's Driver","2nd Driver","Driver Type","Attendance","Route Status","Assets Scheduled","Locations Scheduled","Missed Services","Missed Restocks","Empty Coils","Photos Taken","Spoils","Shrink","Safety Score","Time Started","Time Finished","Pushed"];
+  const hdr=["Date","Branch","Route","Today's Driver","2nd Driver","Driver Type","Attendance","Route Status","Assets Scheduled","Locations Scheduled","Missed Services","Missed Restocks","Empty Coils","Assets Missing Photos","Spoils","Shrink","Safety Score","Time Started","Time Finished","Pushed"];
   const notes=["YYYY-MM-DD","Austin/Dallas/Houston/Linthicum/Midland/San Antonio  (auto-detected from route prefix — column optional)","Route ID e.g. DFW701","Driver name","2nd driver name (optional)","assigned | relief | supervisor | trainee","On Time | Late | Call Out | NCNS | PTO | Open Route | No Route","Not Started | In Progress | Finished","Number","Number","Number","Number","Number","0–100","HH:MM 24-hr","HH:MM 24-hr","yes | no | na"];
   const example=["2026-05-24","Dallas","DFW701","Gambino Hernandez","","assigned","On Time","Finished",45,12,0,0,0,98.5,"07:30","16:15","no"];
   const ws=XLSX.utils.aoa_to_sheet([hdr,notes,example]);
@@ -1827,12 +1830,12 @@ window._importBulkXL=function(){
         const locs=numOr("Locations Scheduled")||numOr("Locations")||null;
         const missed=numOr("Missed Services")||numOr("Missed")||null;
         const safety=fltOr("Safety Score")||fltOr("Safety")||null;
-        const photos=numOr("Photos Taken")||numOr("Photos")||null;
+        const missingPhotos=numOr("Assets Missing Photos")||numOr("Missing Photos")||null;
         const status=ATT_REV[attRaw.toLowerCase()]||null;
         const routeStatus=RS_REV[rsRaw.toLowerCase()]||null;
-        const hasData=driver||assets!==null||locs!==null||missed!==null||safety!==null||status||routeStatus||photos!==null;
+        const hasData=driver||assets!==null||locs!==null||missed!==null||safety!==null||status||routeStatus||missingPhotos!==null;
         if(!hasData){skippedPrev++;return;}
-        preview.push({bid,dk,routeId,driver,status,routeStatus,assets,locs,missed,safety,photos,isNew:!existingRoute,branchLabel:BRANCHES[bid].label});
+        preview.push({bid,dk,routeId,driver,status,routeStatus,assets,locs,missed,safety,missingPhotos,isNew:!existingRoute,branchLabel:BRANCHES[bid].label});
       });
 
       if(!preview.length){showToast("Nothing to import — all rows empty or unrecognized");return;}
@@ -2030,7 +2033,7 @@ window.confirmBulkImport=async function(){
         const m=numOr("Missed Services");if(m!==null)r.missed=m;
         const mr=numOr("Missed Restocks");if(mr!==null)r.missedRestocks=mr;
         const ec=numOr("Empty Coils");if(ec!==null)r.emptyCoils=ec;
-        const ph=numOr("Photos Taken")||numOr("Photos");if(ph!==null)r.photosTaken=ph;
+        const amp=numOr("Assets Missing Photos")||numOr("Missing Photos");if(amp!==null)r.assetsMissingPhotos=amp;
         const sp=fltOr("Spoils");if(sp!==null)r.spoils=sp;
         const sh=fltOr("Shrink");if(sh!==null)r.shrink=sh;
         const sf=fltOr("Safety Score");if(sf!==null)r.safetyScore=String(sf);
@@ -2221,7 +2224,7 @@ function renderRoute(r,i){
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
         <div class="field"><label class="field-lbl">Safety score</label><input data-ri="${i}" data-field="safetyScore" type="number" min="0" max="100" step="0.1" value="${esc(r.safetyScore)}" oninput="onFI()" placeholder="—"></div>
-        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Photos taken</label><input data-ri="${i}" data-field="photosTaken" type="number" min="0" value="${esc(r.photosTaken||0)}" oninput="onFI()" placeholder="0"></div>
+        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Assets missing photos</label><input data-ri="${i}" data-field="assetsMissingPhotos" type="number" min="0" value="${esc(r.assetsMissingPhotos||0)}" oninput="onFI()" placeholder="0"></div>
         <div class="field"><label class="field-lbl">Empty coils</label><input data-ri="${i}" data-field="emptyCoils" type="number" min="0" value="${esc(r.emptyCoils||0)}" oninput="onFI()"></div>
         <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Missed Restocks</label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
         <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
@@ -2317,12 +2320,13 @@ function renderRecapCard(){
     }
 
     // Photo compliance
-    const photos=parseInt(r.photosTaken)||0;
+    const missingPhotos=parseInt(r.assetsMissingPhotos)||0;
     const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
     if(serviced>0){
-      const pct=Math.round(photos/serviced*100);
+      const withPhotos=Math.max(0,serviced-missingPhotos);
+      const pct=Math.round(withPhotos/serviced*100);
       if(pct<90){
-        flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})`,value:pct+"% ("+photos+" of "+serviced+")",sub:"below 90% threshold"});
+        flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})`,value:pct+"% ("+missingPhotos+" missing of "+serviced+")",sub:"below 90% threshold"});
       }
     }
   });
@@ -2814,20 +2818,20 @@ function aggregatePeriodStats(bid,dates){
   const tk=todayKey();
   // Exclude today — partial data skews everything
   const completedDates=dates.filter(d=>d<tk);
-  let tA=0,tM=0,tLate=0,tOut=0,tFin=0,tRun=0,tLocs=0,tMR=0,sfVals=[],revTotal=0,daysWithData=0,tSpoils=0,tShrink=0,tPhotos=0,tServiced=0;
+  let tA=0,tM=0,tLate=0,tOut=0,tFin=0,tRun=0,tLocs=0,tMR=0,sfVals=[],revTotal=0,daysWithData=0,tSpoils=0,tShrink=0,tMissingPhotos=0,tServiced=0;
   completedDates.forEach(dk=>{
     const b=brf[dk];if(!b||!b.routes)return;
     daysWithData++;const s=bStats(b);
     tA+=s.totalAssets;tM+=s.totalMissed;tLate+=s.late;tOut+=s.out;
     tFin+=s.finished;tRun+=s.runningCount;tLocs+=s.totalLocs;tMR+=s.totalMissedRestocks||0;
     tSpoils+=s.totalSpoils||0;tShrink+=s.totalShrink||0;
-    tPhotos+=s.totalPhotos||0;tServiced+=Math.max(0,(s.totalAssets||0)-(s.totalMissed||0));
+    tMissingPhotos+=s.totalMissingPhotos||0;tServiced+=Math.max(0,(s.totalAssets||0)-(s.totalMissed||0));
     if(s.avgSafety!==null)sfVals.push(s.avgSafety);
     if(b.revenue||b.routes)revTotal+=getBranchDayRevenue(bid,dk);
   });
   const otPct=tA>0?Math.round(((tA-tM)/tA)*1000)/10:null;
   const avgSafety=sfVals.length?Math.round(sfVals.reduce((a,b)=>a+b,0)/sfVals.length*100)/100:null;
-  const photoCompl=tServiced>0?Math.round(tPhotos/tServiced*100):null;
+  const photoCompl=tServiced>0?Math.round(Math.max(0,tServiced-tMissingPhotos)/tServiced*100):null;
   return{tA,tM,tLate,tOut,tFin,tRun,tLocs,tMR,otPct,avgSafety,revTotal,daysWithData,tSpoils,tShrink,photoCompl};
 }
 
@@ -3744,7 +3748,7 @@ function getDriverStats(bid,days){
       const name=r.assignedDriver||r.driver;
       if(!name||!name.trim())return; // skip routes with no named driver
       const key=name;
-      if(!drivers[key])drivers[key]={name:key,route:r.id,days:0,assetsTotal:0,missedTotal:0,lateCount:0,safetyScores:[],absenceDays:0,unexcusedDays:0,revenueTotal:0,revDays:0,revWorkdays:0,revOffdays:0,photosTotal:0,servicedTotal:0};
+      if(!drivers[key])drivers[key]={name:key,route:r.id,days:0,assetsTotal:0,missedTotal:0,lateCount:0,safetyScores:[],absenceDays:0,unexcusedDays:0,revenueTotal:0,revDays:0,revWorkdays:0,revOffdays:0,missingPhotosTotal:0,servicedTotal:0};
       const d=drivers[key];
       d.days++;
       if(ABSENCE.includes(r.status)){
@@ -3769,7 +3773,7 @@ function getDriverStats(bid,days){
       }
       // Photo compliance
       const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
-      if(serviced>0){d.photosTotal+=(parseInt(r.photosTaken)||0);d.servicedTotal+=serviced;}
+      if(serviced>0){d.missingPhotosTotal+=(parseInt(r.assetsMissingPhotos)||0);d.servicedTotal+=serviced;}
     });
   });
   return Object.values(drivers).map(d=>{
@@ -3781,7 +3785,7 @@ function getDriverStats(bid,days){
     // Trend: compare last half vs first half of period
     const avgRevenue=activeDays>0?Math.round(d.revenueTotal/activeDays):0;
     const avgDayType=d.revOffdays>d.revWorkdays?"off":"workday";
-    const avgPhotoCompl=d.servicedTotal>0?Math.round(d.photosTotal/d.servicedTotal*100):null;
+    const avgPhotoCompl=d.servicedTotal>0?Math.round(Math.max(0,d.servicedTotal-d.missingPhotosTotal)/d.servicedTotal*100):null;
     return{...d,activeDays,otPct,avgSafety,lateRate,avgMissed,avgRevenue,avgDayType,unexcusedDays:d.unexcusedDays||0,avgPhotoCompl};
   }).filter(d=>d.days>0).sort((a,b)=>{
     // Sort: drivers with data first, by OT% desc
