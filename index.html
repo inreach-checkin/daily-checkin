@@ -2275,11 +2275,16 @@ function renderRecapCard(){
   // Don't show if dismissed today
   if(isRecapDismissed())return"";
 
-  // Get yesterday's briefing
-  const yest=new Date();yest.setDate(yest.getDate()-1);
-  const yk=yest.getFullYear()+"-"+String(yest.getMonth()+1).padStart(2,"0")+"-"+String(yest.getDate()).padStart(2,"0");
-  const yb=st.briefings[yk];
-  if(!yb||!yb.routes)return"";
+  // On Mondays, recap the full weekend (Fri/Sat/Sun) since those days
+  // wouldn't otherwise get reviewed in a morning briefing.
+  const today=new Date();
+  const isMonday=today.getDay()===1;
+  const lookbackDays=isMonday?3:1;
+  const dateKeys=[];
+  for(let i=lookbackDays;i>=1;i--){
+    const d=new Date();d.setDate(d.getDate()-i);
+    dateKeys.push(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"));
+  }
 
   // Thresholds
   const SPOILS_THRESH=350;
@@ -2288,71 +2293,84 @@ function renderRecapCard(){
   const SAFETY_THRESH=85;
 
   const flags=[];
+  let anyDayHadData=false;
 
-  yb.routes.forEach(r=>{
-    if(r.status==="off")return;
-    const name=r.driver||r.assignedDriver||r.id;
-    const route=r.id;
+  dateKeys.forEach(yk=>{
+    const yb=st.briefings[yk];
+    if(!yb||!yb.routes)return;
+    anyDayHadData=true;
+    const dLabel=new Date(yk+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
 
-    // Spoils
-    const spoils=parseFloat(r.spoils)||0;
-    if(spoils>SPOILS_THRESH){
-      flags.push({level:"warn",icon:"ti-trash",label:"High Spoils",detail:`${esc(name)} (${route})`,value:`$${spoils.toFixed(2)}`,sub:"exceeds $"+SPOILS_THRESH+" threshold"});
-    }
+    yb.routes.forEach(r=>{
+      if(r.status==="off")return;
+      const name=r.driver||r.assignedDriver||r.id;
+      const route=r.id;
+      const dayTag=isMonday?` · ${dLabel}`:"";
 
-    // Shrink — flag both directions
-    const shrink=parseFloat(r.shrink)||0;
-    if(Math.abs(shrink)>SHRINK_THRESH){
-      const isNeg=shrink<0;
-      flags.push({level:"danger",icon:"ti-alert-triangle",label:isNeg?"Negative Shrink ⚠":"High Shrink",detail:`${esc(name)} (${route})`,value:(isNeg?"-":"")+"$"+Math.abs(shrink).toFixed(2),sub:isNeg?"Possible data error or return — verify immediately":"exceeds $"+SHRINK_THRESH+" threshold"});
-    }
-
-    // Safety
-    const safety=r.safetyScore!==""&&r.safetyScore!=null?parseFloat(r.safetyScore):null;
-    if(safety!==null&&safety<SAFETY_THRESH){
-      flags.push({level:"danger",icon:"ti-shield-off",label:"Low Safety Score",detail:`${esc(name)} (${route})`,value:String(safety),sub:"below "+SAFETY_THRESH+" threshold"});
-    }
-
-    // Missed restocks
-    const restocks=parseInt(r.missedRestocks)||0;
-    if(restocks>=RESTOCKS_THRESH){
-      flags.push({level:"warn",icon:"ti-package-off",label:"Missed Restocks",detail:`${esc(name)} (${route})`,value:restocks+" restocks",sub:"meets or exceeds "+RESTOCKS_THRESH+" threshold"});
-    }
-
-    // Photo compliance
-    const missingPhotos=parseInt(r.assetsMissingPhotos)||0;
-    const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
-    if(serviced>0){
-      const withPhotos=Math.max(0,serviced-missingPhotos);
-      const pct=Math.round(withPhotos/serviced*100);
-      if(pct<90){
-        flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})`,value:pct+"% ("+missingPhotos+" missing of "+serviced+")",sub:"below 90% threshold"});
+      // Spoils
+      const spoils=parseFloat(r.spoils)||0;
+      if(spoils>SPOILS_THRESH){
+        flags.push({level:"warn",icon:"ti-trash",label:"High Spoils",detail:`${esc(name)} (${route})${dayTag}`,value:`$${spoils.toFixed(2)}`,sub:"exceeds $"+SPOILS_THRESH+" threshold"});
       }
+
+      // Shrink — flag both directions
+      const shrink=parseFloat(r.shrink)||0;
+      if(Math.abs(shrink)>SHRINK_THRESH){
+        const isNeg=shrink<0;
+        flags.push({level:"danger",icon:"ti-alert-triangle",label:isNeg?"Negative Shrink ⚠":"High Shrink",detail:`${esc(name)} (${route})${dayTag}`,value:(isNeg?"-":"")+"$"+Math.abs(shrink).toFixed(2),sub:isNeg?"Possible data error or return — verify immediately":"exceeds $"+SHRINK_THRESH+" threshold"});
+      }
+
+      // Safety
+      const safety=r.safetyScore!==""&&r.safetyScore!=null?parseFloat(r.safetyScore):null;
+      if(safety!==null&&safety<SAFETY_THRESH){
+        flags.push({level:"danger",icon:"ti-shield-off",label:"Low Safety Score",detail:`${esc(name)} (${route})${dayTag}`,value:String(safety),sub:"below "+SAFETY_THRESH+" threshold"});
+      }
+
+      // Missed restocks
+      const restocks=parseInt(r.missedRestocks)||0;
+      if(restocks>=RESTOCKS_THRESH){
+        flags.push({level:"warn",icon:"ti-package-off",label:"Missed Restocks",detail:`${esc(name)} (${route})${dayTag}`,value:restocks+" restocks",sub:"meets or exceeds "+RESTOCKS_THRESH+" threshold"});
+      }
+
+      // Photo compliance
+      const missingPhotos=parseInt(r.assetsMissingPhotos)||0;
+      const serviced=Math.max(0,(parseInt(r.assets)||0)-(parseInt(r.missed)||0));
+      if(serviced>0){
+        const withPhotos=Math.max(0,serviced-missingPhotos);
+        const pct=Math.round(withPhotos/serviced*100);
+        if(pct<90){
+          flags.push({level:"warn",icon:"ti-camera-off",label:"Low Photo Compliance",detail:`${esc(name)} (${route})${dayTag}`,value:pct+"% ("+missingPhotos+" missing of "+serviced+")",sub:"below 90% threshold"});
+        }
+      }
+    });
+
+    // Also check overflow spoils/shrink
+    if(yb.spoilsShrinkOverflow){
+      const dayTag=isMonday?` · ${dLabel}`:"";
+      Object.entries(yb.spoilsShrinkOverflow).forEach(([routeId,data])=>{
+        const spoils=parseFloat(data.spoils)||0;
+        const shrink=parseFloat(data.shrink)||0;
+        if(spoils>SPOILS_THRESH)flags.push({level:"warn",icon:"ti-trash",label:"High Spoils",detail:`${routeId} (unlisted route)${dayTag}`,value:`$${spoils.toFixed(2)}`,sub:"exceeds $"+SPOILS_THRESH+" threshold"});
+        if(Math.abs(shrink)>SHRINK_THRESH){
+          const isNeg=shrink<0;
+          flags.push({level:"danger",icon:"ti-alert-triangle",label:isNeg?"Negative Shrink ⚠":"High Shrink",detail:`${routeId} (unlisted route)${dayTag}`,value:(isNeg?"-":"")+"$"+Math.abs(shrink).toFixed(2),sub:isNeg?"Possible data error or return — verify immediately":"exceeds $"+SHRINK_THRESH+" threshold"});
+        }
+      });
     }
   });
 
-  // Also check overflow spoils/shrink
-  if(yb.spoilsShrinkOverflow){
-    Object.entries(yb.spoilsShrinkOverflow).forEach(([routeId,data])=>{
-      const spoils=parseFloat(data.spoils)||0;
-      const shrink=parseFloat(data.shrink)||0;
-      if(spoils>SPOILS_THRESH)flags.push({level:"warn",icon:"ti-trash",label:"High Spoils",detail:`${routeId} (unlisted route)`,value:`$${spoils.toFixed(2)}`,sub:"exceeds $"+SPOILS_THRESH+" threshold"});
-      if(Math.abs(shrink)>SHRINK_THRESH){
-        const isNeg=shrink<0;
-        flags.push({level:"danger",icon:"ti-alert-triangle",label:isNeg?"Negative Shrink ⚠":"High Shrink",detail:`${routeId} (unlisted route)`,value:(isNeg?"-":"")+"$"+Math.abs(shrink).toFixed(2),sub:isNeg?"Possible data error or return — verify immediately":"exceeds $"+SHRINK_THRESH+" threshold"});
-      }
-    });
-  }
-
   if(!flags.length)return"";
 
-  const dayLabel=yest.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  const dayLabel=isMonday
+    ?`${new Date(dateKeys[0]+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${new Date(dateKeys[dateKeys.length-1]+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}`
+    :new Date(dateKeys[0]+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+  const cardTitle=isMonday?"Weekend Recap":"Yesterday's Recap";
 
   return`<div style="margin-bottom:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
         <i class="ti ti-clipboard-list" style="color:var(--warn-text);font-size:16px"></i>
-        <span style="font-size:12px;font-weight:700;color:var(--warn-text);text-transform:uppercase;letter-spacing:.06em">Yesterday's Recap</span>
+        <span style="font-size:12px;font-weight:700;color:var(--warn-text);text-transform:uppercase;letter-spacing:.06em">${cardTitle}</span>
         <span style="font-size:11px;color:var(--text-2)">${dayLabel}</span>
       </div>
       <button onclick="dismissRecap()" style="font-size:11px;color:var(--text-3);padding:3px 8px;border:1px solid var(--border);border-radius:20px;background:var(--bg-2);font-weight:500">Dismiss</button>
