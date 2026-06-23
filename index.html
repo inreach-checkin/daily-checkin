@@ -306,7 +306,7 @@ const SAT_ROUTES=[
 ];
 const SAT_STAFF=[
   "Rickey Terrell","Pat Slade",
-  "Dennis Rendon","Kenny Otis","Christopher Adkins","Art Perez","Angel Galarza"
+  "Dennis Rendon","Kenny Otis","Christopher Adkins","Art Perez","Angel Galarza","Robert Logan"
 ];
 const ALLENTOWN_ROUTES=[{"id":"ALL Rt 10","driver":""},{"id":"ALL Rt 20 - Glen L","driver":"Glen Lehr"},{"id":"ALL Rt 04 - Ryan K","driver":"Ryan Kastler"},{"id":"ALL RT 07 - Richard","driver":"Richard Williams"},{"id":"ALL Rt 11","driver":"Jason Solano"}];
 const ALTOONA_ROUTES=[{"id":"ALT001","driver":"Brett Buterbaugh"},{"id":"ALT002","driver":"Justin Manning"},{"id":"ALT005","driver":"Tye Aspedon"}];
@@ -3886,7 +3886,7 @@ function renderDrivers(){
 
   // ---- Ranking ----
   // Qualification: avg ≥15 assets per workday (active days excl. absences)
-  const MIN_ASSETS_PER_DAY=15;
+  const MIN_REV_PER_DAY=2000;
   function driverScore(d){
     const g=driverGrade(d.otPct,d.avgSafety,d.lateRate,d.avgMissed,d.absenceDays,d.activeDays,d.avgRevenue,d.avgDayType,d.unexcusedDays,d.avgPhotoCompl);
     // compute raw numeric score (same logic as driverGrade but return number)
@@ -3901,7 +3901,7 @@ function renderDrivers(){
     if(d.avgPhotoCompl!==null){if(d.avgPhotoCompl>=90)s+=1;else if(d.avgPhotoCompl<80)s-=1;}
     return s;
   }
-  function isQualified(d){return d.activeDays>0&&d.assetsTotal/d.activeDays>=MIN_ASSETS_PER_DAY;}
+  function isQualified(d){return d.activeDays>0&&d.revenueTotal/d.activeDays>=MIN_REV_PER_DAY;}
 
   // Branch rank — among qualified drivers in this branch
   const branchRanked=[...drivers].filter(isQualified).sort((a,b)=>{const sd=driverScore(b)-driverScore(a);if(sd!==0)return sd;const otd=(b.otPct||0)-(a.otPct||0);if(otd!==0)return otd;return b.revenueTotal-a.revenueTotal;});
