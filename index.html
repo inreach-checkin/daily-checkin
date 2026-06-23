@@ -4383,69 +4383,50 @@ document.addEventListener('keydown',e=>{
 
 // ---- Auto-finish all routes at end of day ----
 function autoFinishDay(){
-  // At midnight, finish the day that just ended (yesterdayKey)
-  // Only write branches whose data came from Firestore — use branchUnsubs as proxy
+  // ONLY update checkInStatus — never write routes from memory.
+  // In-memory routes may be stale/empty for branches not actively subscribed,
+  // and writing them would silently overwrite real data from imports.
   const yk=yesterdayKey();
-  let anyChange=false;
   const subscribedBids=Object.keys(fb.branchUnsubs||{});
-  const bidsToProcess=subscribedBids.length?subscribedBids:BRANCH_IDS;
-  bidsToProcess.forEach(bid=>{
+  subscribedBids.forEach(bid=>{
     const brf=st.branchBriefings[bid]||{};
     const b=brf[yk];
-    if(!b||!b.routes)return;
-    let dayChanged=false;
-    b.routes.forEach(r=>{
-      if(r.status!=='off'&&r.routeStatus!=='finished'){r.routeStatus='finished';dayChanged=true;}
-    });
-    if(b.checkInStatus!=='finished'){b.checkInStatus='finished';b.published=true;dayChanged=true;}
-    if(dayChanged){
-      anyChange=true;
-      if(st.syncStatus==='live'&&fb.modules&&fb.db){
-        const{doc,updateDoc}=fb.modules;
-        updateDoc(doc(fb.db,BRANCHES[bid].collection,yk),{
-          routes:b.routes,checkInStatus:b.checkInStatus,published:b.published,
-          lastEditedAt:new Date().toISOString(),lastEditedBy:st.managerName||"(auto-finish)"
-        }).catch(()=>{});
-      }
+    // Skip if no briefing, no routes, empty routes, or already finished
+    if(!b||!b.routes||!b.routes.length||b.checkInStatus==='finished')return;
+    b.checkInStatus='finished';b.published=true;
+    if(st.syncStatus==='live'&&fb.modules&&fb.db){
+      const{doc,updateDoc}=fb.modules;
+      // Surgical write — checkInStatus ONLY, routes untouched
+      updateDoc(doc(fb.db,BRANCHES[bid].collection,yk),{
+        checkInStatus:'finished',published:true,
+        lastEditedAt:new Date().toISOString(),lastEditedBy:'(auto-finish)'
+      }).catch(()=>{});
     }
   });
-  if(anyChange){
-    if(st.branch)st.briefings=st.branchBriefings[st.branch]||{};
-    render();
-    showToast('Day ended — all routes marked finished');
-  }
+  if(st.branch)st.briefings=st.branchBriefings[st.branch]||{};
+  render();
   scheduleMidnightFinish();
 }
 
 // Sweep stale days for a SPECIFIC branch — only called after fresh Firestore snapshot
 // Never call this on IDB-cached data (could overwrite newer Firestore imports)
 function sweepBranchStaleDays(bid, brf){
+  // ONLY update checkInStatus — never write routes from memory.
+  // Routes written from stale in-memory data would silently overwrite real import data.
   const tk=todayKey();
-  let changed=false;
   Object.entries(brf).forEach(([dk,b])=>{
-    if(dk>=tk||!b||!b.routes)return;
-    let dayChanged=false;
-    b.routes.forEach(r=>{
-      if(r.status!=='off'&&r.routeStatus!=='finished'){r.routeStatus='finished';dayChanged=true;}
-    });
-    if(b.checkInStatus&&b.checkInStatus!=='finished'){
-      b.checkInStatus='finished';b.published=true;dayChanged=true;
-    }
-    if(dayChanged){
-      changed=true;
-      // Defense in depth: write ONLY the two fields that changed (routes, checkInStatus)
-      // rather than a full document overwrite, so this can never clobber other data
-      // even in an edge case the fromCache guard didn't catch.
-      if(st.syncStatus==='live'&&fb.modules&&fb.db){
-        const{doc,updateDoc}=fb.modules;
-        updateDoc(doc(fb.db,BRANCHES[bid].collection,dk),{
-          routes:b.routes,checkInStatus:b.checkInStatus,published:b.published,
-          lastEditedAt:new Date().toISOString(),lastEditedBy:st.managerName||"(auto-finish)"
-        }).catch(()=>{});
-      }
+    if(dk>=tk||!b||!b.routes||!b.routes.length)return;
+    if(b.checkInStatus==='finished')return;
+    b.checkInStatus='finished';b.published=true;
+    if(st.syncStatus==='live'&&fb.modules&&fb.db){
+      const{doc,updateDoc}=fb.modules;
+      updateDoc(doc(fb.db,BRANCHES[bid].collection,dk),{
+        checkInStatus:'finished',published:true,
+        lastEditedAt:new Date().toISOString(),lastEditedBy:'(auto-finish)'
+      }).catch(()=>{});
     }
   });
-  if(changed&&bid===st.branch)st.briefings=brf;
+  if(bid===st.branch)st.briefings=brf;
 }
 
 function scheduleMidnightFinish(){
