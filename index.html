@@ -2144,7 +2144,7 @@ function renderRoute(r,i){
             ${staff.map(n=>`<option value="${esc(n)}"${selectVal===n?" selected":""}>${esc(n)}</option>`).join("")}
             <option value="__manual__"${isManual?" selected":""}>Other (manual entry)</option>
           </select>
-          ${isManual?`<input data-ri="${i}" data-field="driver" type="text" value="${esc(r.driver)}" oninput="onFI()" placeholder="Enter name" style="margin-top:6px">`:""}
+          ${isManual?`<input data-ri="${i}" data-field="driver" type="text" value="${esc(r.driver)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
           <div style="margin-top:8px">
             ${sd===""?`<button class="btn-sec" style="width:100%;font-size:12px;padding:7px" onclick="addSecondDriver(${i})">
               <i class="ti ti-user-plus"></i> Add 2nd driver</button>`
@@ -2157,7 +2157,7 @@ function renderRoute(r,i){
                     ${staff.map(n=>`<option value="${esc(n)}"${sd2Val===n?" selected":""}>${esc(n)}</option>`).join("")}
                     <option value="__manual2__"${sd2Manual?" selected":""}>Other (manual entry)</option>
                   </select>
-                  ${sd2Manual?`<input data-ri="${i}" data-field="secondDriver" type="text" value="${esc(sd)}" oninput="onFI()" placeholder="Enter name" style="margin-top:6px">`:""}
+                  ${sd2Manual?`<input data-ri="${i}" data-field="secondDriver" type="text" value="${esc(sd)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
                 </div>
                 <button onclick="clearSecondDriver(${i})" style="padding:8px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--danger-text);flex-shrink:0;min-height:38px"><i class="ti ti-x"></i></button>
               </div>
@@ -2173,7 +2173,7 @@ function renderRoute(r,i){
                         ${staff.map(n=>`<option value="${esc(n)}"${td2Val===n?" selected":""}>${esc(n)}</option>`).join("")}
                         <option value="__manual3__"${td2Manual?" selected":""}>Other (manual entry)</option>
                       </select>
-                      ${td2Manual?`<input data-ri="${i}" data-field="thirdDriver" type="text" value="${esc(td)}" oninput="onFI()" placeholder="Enter name" style="margin-top:6px">`:""}
+                      ${td2Manual?`<input data-ri="${i}" data-field="thirdDriver" type="text" value="${esc(td)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
                     </div>
                     <button onclick="clearThirdDriver(${i})" style="padding:8px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--danger-text);flex-shrink:0;min-height:38px"><i class="ti ti-x"></i></button>
                   </div>
@@ -3884,6 +3884,41 @@ function renderDrivers(){
   const branchSf=drivers.filter(d=>d.avgSafety!==null);
   const avgSf=branchSf.length?Math.round(branchSf.reduce((a,d)=>a+d.avgSafety,0)/branchSf.length*10)/10:null;
 
+  // ---- Ranking ----
+  // Qualification: avg ≥15 assets per workday (active days excl. absences)
+  const MIN_ASSETS_PER_DAY=15;
+  function driverScore(d){
+    const g=driverGrade(d.otPct,d.avgSafety,d.lateRate,d.avgMissed,d.absenceDays,d.activeDays,d.avgRevenue,d.avgDayType,d.unexcusedDays,d.avgPhotoCompl);
+    // compute raw numeric score (same logic as driverGrade but return number)
+    let s=0;
+    if(d.otPct!==null){if(d.otPct>=98)s+=3;else if(d.otPct>=95)s+=2;else if(d.otPct>=90)s+=1;}
+    if(d.avgSafety!==null){if(d.avgSafety>=95)s+=2;else if(d.avgSafety>=85)s+=1;}
+    if(d.lateRate===0)s+=1;else if(d.lateRate>10)s-=1;
+    const unexcused=d.unexcusedDays||0;const totalDays=Math.max(1,d.activeDays+(d.absenceDays||0));
+    const annRate=unexcused/totalDays*365;
+    if(unexcused===0)s+=2;else if(annRate<=3)s+=2;else if(annRate<=6)s+=0;else s-=2;
+    if(d.avgRevenue>0){const tgt=d.avgDayType==="off"?ROUTE_OFFDAY_TARGET:ROUTE_WORKDAY_TARGET;const pct=d.avgRevenue/tgt*100;if(pct>=90)s+=1;else if(pct<75)s-=1;}
+    if(d.avgPhotoCompl!==null){if(d.avgPhotoCompl>=90)s+=1;else if(d.avgPhotoCompl<80)s-=1;}
+    return s;
+  }
+  function isQualified(d){return d.activeDays>0&&d.assetsTotal/d.activeDays>=MIN_ASSETS_PER_DAY;}
+
+  // Branch rank — among qualified drivers in this branch
+  const branchRanked=[...drivers].filter(isQualified).sort((a,b)=>{const sd=driverScore(b)-driverScore(a);if(sd!==0)return sd;const otd=(b.otPct||0)-(a.otPct||0);if(otd!==0)return otd;return b.revenueTotal-a.revenueTotal;});
+  const branchRankMap={};branchRanked.forEach((d,i)=>{branchRankMap[d.name+"::"+d.route]=i+1;});
+
+  // Company rank — among qualified drivers across all loaded branches
+  const loadedBids=Object.keys(st.branchBriefings).filter(bid=>bid!==st.branch&&Object.keys(st.branchBriefings[bid]||{}).length>0);
+  let allDrivers=[...drivers];
+  let branchesIncluded=1;
+  loadedBids.forEach(bid=>{
+    const bd=getDriverStats(bid,range);
+    if(bd.length){allDrivers=[...allDrivers,...bd];branchesIncluded++;}
+  });
+  const companyRanked=allDrivers.filter(isQualified).sort((a,b)=>{const sd=driverScore(b)-driverScore(a);if(sd!==0)return sd;const otd=(b.otPct||0)-(a.otPct||0);if(otd!==0)return otd;return b.revenueTotal-a.revenueTotal;});
+  const companyRankMap={};companyRanked.forEach((d,i)=>{companyRankMap[d.name+"::"+d.route]=i+1;});
+  const totalQualified=companyRanked.length;
+
   let html2='<div class="app-header"><div style="display:flex;align-items:center;gap:10px"><img src="icon.png" class="app-logo" alt=""><div>';
   html2+='<div class="app-title">Driver Scorecards</div>';
   html2+='<div class="app-sub">'+activeBranch().label+' &middot; '+rangeLabel+'</div></div></div></div>';
@@ -3926,7 +3961,18 @@ function renderDrivers(){
       html2+='<div class="card" style="margin-bottom:10px">';
       html2+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">';
       html2+='<div><div style="font-size:15px;font-weight:700">'+esc(d.name)+'</div>';
-      html2+='<div style="font-size:11px;color:var(--text-2);margin-top:2px">'+d.route+' &middot; '+d.activeDays+' active day'+(d.activeDays===1?"":"s")+(d.revenueTotal>0?' &middot; <span style="color:var(--brand);font-weight:700">'+fmtMoneyAbbr(d.revenueTotal)+' total</span>':'')+'</div></div>';
+      html2+='<div style="font-size:11px;color:var(--text-2);margin-top:2px">'+d.route+' &middot; '+d.activeDays+' active day'+(d.activeDays===1?"":"s")+(d.revenueTotal>0?' &middot; <span style="color:var(--brand);font-weight:700">'+fmtMoneyAbbr(d.revenueTotal)+' total</span>':'')+'</div>';
+      // Rank chips — only for qualified drivers (≥15 assets/workday)
+      if(isQualified(d)){
+        const bRank=branchRankMap[d.name+"::"+d.route];
+        const cRank=companyRankMap[d.name+"::"+d.route];
+        html2+='<div style="font-size:9px;color:var(--text-3);margin-top:3px;font-weight:600;letter-spacing:.02em">';
+        if(bRank)html2+='<span title="Branch rank">#'+bRank+' branch</span>';
+        if(bRank&&cRank)html2+='<span style="margin:0 4px;opacity:.4">&middot;</span>';
+        if(cRank)html2+='<span title="Company rank ('+branchesIncluded+' branches)">#'+cRank+' co. of '+totalQualified+'</span>';
+        html2+='</div>';
+      }
+      html2+='</div>';
       html2+='<div style="text-align:center;background:'+grade.bg+';border-radius:10px;padding:6px 14px;min-width:52px">';
       html2+='<div style="font-size:22px;font-weight:800;color:'+gradeColor+';line-height:1">'+grade.label+'</div>';
       html2+='<div style="font-size:9px;color:var(--text-2);margin-top:2px;font-weight:700">GRADE</div></div></div>';
