@@ -1780,6 +1780,20 @@ window._importBulkXL=function(){
         }));
       }
 
+function fuzzyRouteMatch(routes, importId){
+  if(!routes||!importId)return null;
+  const imp=importId.toLowerCase().trim();
+  // 1. Exact match
+  let m=routes.find(rt=>rt.id.toLowerCase()===imp);
+  if(m)return m;
+  // 2. Import ID starts with existing route ID (e.g. "HOU609 Daikin" → "HOU609")
+  m=routes.find(rt=>imp.startsWith(rt.id.toLowerCase()));
+  if(m)return m;
+  // 3. First 6 chars match (key prefix, e.g. "HOU609")
+  const prefix=imp.substring(0,6);
+  if(prefix.length===6)m=routes.find(rt=>rt.id.toLowerCase().startsWith(prefix));
+  return m||null;
+}
       // ---- PARSE PHASE — build preview, don't touch state ----
       const ATT_REV={};Object.entries(ATT_L).forEach(([k,v])=>{ATT_REV[v.toLowerCase()]=k;});
       const RS_REV={};Object.entries(RSL).forEach(([k,v])=>{RS_REV[v.toLowerCase()]=k;});
@@ -1819,7 +1833,7 @@ window._importBulkXL=function(){
         if(!bid){skippedPrev++;return;}
         const brf=st.branchBriefings[bid]||{};
         const b=brf[dk];
-        const existingRoute=b?.routes?.find(rt=>rt.id===routeId||rt.id.toLowerCase()===routeId.toLowerCase());
+        const existingRoute=b?.routes?fuzzyRouteMatch(b.routes,routeId):null;
         const g=col=>{const v=row[col];return(v===undefined||v===null||v==="")?"":String(v).trim();};
         const numOr=col=>{const n=parseFloat(g(col));return isNaN(n)?null:n;};
         const fltOr=col=>{const n=parseFloat(g(col));return isNaN(n)?null:n;};
@@ -1986,7 +2000,7 @@ window.confirmBulkImport=async function(){
         if(bid===st.branch)st.briefings=st.branchBriefings[bid];
 
         // Case-insensitive route match first
-        let r=b.routes.find(rt=>rt.id===routeId)||b.routes.find(rt=>rt.id.toLowerCase()===routeId.toLowerCase());
+        let r=fuzzyRouteMatch(b.routes,routeId);
         if(!r){
           // Route not in daily list — create an ad-hoc entry so historical data is preserved
           const g2=col=>{const v=row[col];return(v===undefined||v===null)?null:String(v).trim();};
