@@ -90,7 +90,28 @@ textarea{height:64px;resize:none}
 .sb-ns{background:var(--danger-bg);color:var(--danger-text)}.sb-ip{background:var(--warn-bg);color:var(--warn-text)}.sb-fn{background:var(--ok-bg);color:var(--ok-text)}
 .status-badge{font-size:11px;padding:4px 11px;border-radius:20px;font-weight:700;display:inline-flex;align-items:center;gap:4px}
 
-/* ── Shimmer skeleton ── */
+/* ── Tutorial ── */
+.tut-overlay{position:fixed;inset:0;z-index:9000;pointer-events:none;background:transparent;transition:background .3s}
+.tut-overlay.active{background:rgba(0,0,0,.62);pointer-events:all}
+.tut-spotlight{position:relative;z-index:9001;box-shadow:0 0 0 9999px rgba(0,0,0,.62),0 0 0 3px var(--brand),0 0 20px rgba(199,58,13,.5);border-radius:inherit;pointer-events:none}
+.tut-card{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;width:calc(100vw - 32px);max-width:420px;background:var(--bg);border-radius:var(--radius-xl);padding:22px 20px 18px;box-shadow:0 8px 40px rgba(0,0,0,.28),0 2px 8px rgba(0,0,0,.12);z-index:9002;animation:tut-rise .3s cubic-bezier(.34,1.56,.64,1)}
+@keyframes tut-rise{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.tut-step{font-size:10px;font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.tut-title{font-size:17px;font-weight:800;color:var(--text);margin-bottom:8px;line-height:1.25}
+.tut-body{font-size:13px;color:var(--text-2);line-height:1.6;margin-bottom:16px}
+.tut-body strong{color:var(--text);font-weight:700}
+.tut-progress{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap}
+.tut-dot{width:6px;height:6px;border-radius:50%;background:var(--bg-3);flex-shrink:0;transition:all .2s}
+.tut-dot.done{background:var(--brand);opacity:.5}
+.tut-dot.current{background:var(--brand);width:18px;border-radius:3px}
+.tut-actions{display:flex;gap:8px;align-items:center}
+.tut-btn-next{flex:1;background:var(--brand);color:#fff;border:none;border-radius:var(--radius-md);padding:13px;font-size:14px;font-weight:800;cursor:pointer}
+.tut-btn-prev{flex:0 0 44px;background:var(--bg-2);color:var(--text-2);border:1.5px solid var(--border-2);border-radius:var(--radius-md);padding:13px;font-size:14px;cursor:pointer}
+.tut-btn-skip{font-size:11px;color:var(--text-3);background:none;border:none;cursor:pointer;padding:6px 4px;white-space:nowrap}
+.tut-invite{background:linear-gradient(135deg,var(--brand) 0%,#A8320B 100%);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px}
+.tut-invite-text{flex:1}
+.tut-invite-title{font-size:14px;font-weight:800;color:#fff;margin-bottom:2px}
+.tut-invite-sub{font-size:12px;color:rgba(255,255,255,.8);line-height:1.4}
 .shimmer{background:linear-gradient(90deg,var(--bg-2) 0%,var(--bg-3) 40%,var(--bg-2) 80%);background-size:300% 100%;animation:shimmer 1.6s ease-in-out infinite}
 @keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
 .skel-line{border-radius:6px;height:14px;margin-bottom:8px}
@@ -2136,7 +2157,7 @@ function renderRoute(r,i){
           <button class="toggle-btn${r.driverType==="trainee"?" t-on":""}" onclick="setDT(${i},'trainee')">Trainee</button>
         </div>
       </div>
-      <div class="field">
+      <div class="field" data-tut="field-driver">
         <label class="field-lbl">${r.driverType==="assigned"?"Driver name":"Who's covering"}</label>
         ${(()=>{
           const isManual=r.driver&&!staff.includes(r.driver);
@@ -2217,7 +2238,7 @@ function renderRoute(r,i){
         </div>
       </div>
       <div class="two-col">
-        <div class="field"><label class="field-lbl">Missed services</label><input data-ri="${i}" data-field="missed" type="number" min="0" value="${esc(r.missed)}" oninput="onFI()"></div>
+        <div class="field" data-tut="field-missed"><label class="field-lbl">Missed services</label><input data-ri="${i}" data-field="missed" type="number" min="0" value="${esc(r.missed)}" oninput="onFI()"></div>
         <div class="field"><label class="field-lbl">Pushed</label>
           <select data-ri="${i}" data-field="pushed" onchange="onFI()">
             <option value="no"${r.pushed==="no"?" selected":""}>No</option>
@@ -2227,19 +2248,19 @@ function renderRoute(r,i){
         </div>
       </div>
       <div class="two-col">
-        <div class="field"><label class="field-lbl">Assets scheduled</label><input data-ri="${i}" data-field="assets" type="number" min="0" value="${esc(r.assets)}" oninput="onFI()" placeholder="—"></div>
+        <div class="field" data-tut="field-assets"><label class="field-lbl">Assets scheduled</label><input data-ri="${i}" data-field="assets" type="number" min="0" value="${esc(r.assets)}" oninput="onFI()" placeholder="—"></div>
         <div class="field"><label class="field-lbl">Locations scheduled</label><input data-ri="${i}" data-field="locations" type="number" min="0" value="${esc(r.locations)}" oninput="onFI()" placeholder="—"></div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
-        <div class="field"><label class="field-lbl">Safety score</label><input data-ri="${i}" data-field="safetyScore" type="number" min="0" max="100" step="0.1" value="${esc(r.safetyScore)}" oninput="onFI()" placeholder="—"></div>
-        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Assets missing photos</label><input data-ri="${i}" data-field="assetsMissingPhotos" type="number" min="0" value="${esc(r.assetsMissingPhotos||0)}" oninput="onFI()" placeholder="0"></div>
+        <div class="field" data-tut="field-safety"><label class="field-lbl">Safety score</label><input data-ri="${i}" data-field="safetyScore" type="number" min="0" max="100" step="0.1" value="${esc(r.safetyScore)}" oninput="onFI()" placeholder="—"></div>
+        <div class="field" data-tut="field-photos"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Assets missing photos</label><input data-ri="${i}" data-field="assetsMissingPhotos" type="number" min="0" value="${esc(r.assetsMissingPhotos||0)}" oninput="onFI()" placeholder="0"></div>
         <div class="field"><label class="field-lbl">Empty coils</label><input data-ri="${i}" data-field="emptyCoils" type="number" min="0" value="${esc(r.emptyCoils||0)}" oninput="onFI()"></div>
-        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Missed Restocks</label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
-        <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
+        <div class="field" data-tut="field-restocks"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Missed Restocks</label><input data-ri="${i}" data-field="missedRestocks" type="number" min="0" value="${esc(r.missedRestocks||0)}" oninput="onFI()"></div>
+        <div class="field" data-tut="field-spoils"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Spoils ($)</label><input data-ri="${i}" data-field="spoils" type="number" min="0" step="0.01" value="${esc(r.spoils||0)}" oninput="onFI()" placeholder="0.00"></div>
         <div class="field"><label class="field-lbl" style="border-bottom:1.5px solid rgba(199,58,13,.3);color:var(--brand);padding-bottom:3px">Shrink ($)</label><input data-ri="${i}" data-field="shrink" type="number" min="0" step="0.01" value="${esc(r.shrink||0)}" oninput="onFI()" placeholder="0.00"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div class="field"><label class="field-lbl">Time started</label><input data-ri="${i}" data-field="timeStarted" type="time" value="${esc(r.timeStarted||'')}" oninput="onFI()" style="font-size:13px;padding:10px 8px;text-align:center"></div>
+        <div class="field" data-tut="field-time"><label class="field-lbl">Time started</label><input data-ri="${i}" data-field="timeStarted" type="time" value="${esc(r.timeStarted||'')}" oninput="onFI()" style="font-size:13px;padding:10px 8px;text-align:center"></div>
         <div class="field"><label class="field-lbl">Time finished</label><input data-ri="${i}" data-field="timeFinished" type="time" value="${esc(r.timeFinished||'')}" oninput="onFI()" style="font-size:13px;padding:10px 8px;text-align:center"></div>
       </div>
       ${(()=>{
@@ -2374,7 +2395,7 @@ function renderRecapCard(){
     :new Date(dateKeys[0]+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
   const cardTitle=isMonday?"Weekend Recap":"Yesterday's Recap";
 
-  return`<div style="margin-bottom:16px">
+  return`<div data-tut="recap" style="margin-bottom:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:6px">
         <i class="ti ti-clipboard-list" style="color:var(--warn-text);font-size:16px"></i>
@@ -2412,7 +2433,8 @@ function renderEntry(){
     <button onclick="nextDay()" style="padding:6px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text);font-size:16px;min-height:36px;display:flex;align-items:center;justify-content:center"><i class="ti ti-chevron-right" style="font-size:16px"></i></button>
   </div></div>
   ${isToday?renderAnnouncementBanner():""}
-  ${branchPill()}
+  ${isToday?renderTutInvite():""}
+  <div data-tut="branch-pill">${branchPill()}</div>
   ${(()=>{
     // Progress ring — routes finished / total
     const pct=total>0?finished/total:0;
@@ -2440,7 +2462,7 @@ function renderEntry(){
       </div>
     </div>`;
   })()}
-  ${stepperHTML(b.checkInStatus,true)}
+  <div data-tut="stepper">${stepperHTML(b.checkInStatus,true)}</div>
   ${isToday&&b.checkInStatus!=="finished"?renderRecapCard():""}
   <div class="section">
     <span class="section-lbl">Coverage notes (optional)</span>
@@ -2448,7 +2470,7 @@ function renderEntry(){
   </div>
   ${isWeekend(selKey())?`<div class="info-box" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;margin-bottom:14px"><span><i class="ti ti-calendar-off" style="vertical-align:-2px;margin-right:4px"></i>Weekend — mark routes not running today.</span><button class="btn-sec" style="flex-shrink:0;font-size:12px;padding:6px 10px;min-height:auto" onclick="markAllOff()">Mark all off</button></div>`:""}
   <div class="section">
-    <span class="section-lbl">Routes — tap to expand</span>
+    <span class="section-lbl" data-tut="route-section">Routes — tap to expand</span>
     ${(()=>{
       const active=b.routes.map((r,i)=>({r,i})).filter(({r})=>!r.isAdHoc&&r.routeStatus!=="finished");
       const finished=b.routes.map((r,i)=>({r,i})).filter(({r})=>!r.isAdHoc&&r.routeStatus==="finished");
@@ -2497,8 +2519,7 @@ function renderSum(b,opts={}){
   </div>`:""}
   ${opts.isToday?`${branchPill()}`:""}
   ${stepperHTML(b.checkInStatus,!!opts.isToday)}
-  <div class="kpi-grid">
-    <div class="kpi"><div class="kpi-lbl">On-Time Delivery</div><div class="kpi-val ${s.otPct===null?"":(s.otPct>=95?"kv-s":s.otPct>=85?"kv-w":"kv-d")}">${s.otPct===null?"—":s.otPct+"%"}</div>${prev?delta(s.otPct,prev.otPct,false):""}</div>
+  <div class="kpi-grid" data-tut="kpi-grid">
     <div class="kpi"><div class="kpi-lbl">Avg Safety Score</div><div class="kpi-val ${s.avgSafety===null?"":(s.avgSafety>=95?"kv-s":s.avgSafety>=85?"kv-w":"kv-d")}">${s.avgSafety===null?"—":s.avgSafety}</div>${prev?delta(s.avgSafety,prev.avgSafety,false):""}</div>
     <div class="kpi"><div class="kpi-lbl">Routes Finished</div><div class="kpi-val ${s.finished===s.runningCount?"kv-s":s.finished>0?"kv-w":"kv-d"}">${s.finished}/${s.runningCount}</div></div>
     <div class="kpi"><div class="kpi-lbl">Missed Services</div><div class="kpi-val ${s.totalMissed===0?"kv-s":s.totalMissed<=2?"kv-w":"kv-d"}">${s.totalMissed}</div>${prev?delta(s.totalMissed,prev.totalMissed,true):""}</div>
@@ -2762,6 +2783,10 @@ function renderSettings(){
     <div class="setting-row">
       <div class="setting-info"><div class="setting-title">${fbUser?esc(fbUser.email):"Not signed in"}</div><div class="setting-desc">${st.syncStatus==="live"?"Connected · syncing in real time":st.syncStatus==="error"?`<span style="color:var(--danger-text)">${esc(st.syncError)}</span>`:"Connecting…"}</div></div>
       <button class="btn-sec btn-danger" style="flex:0 0 auto;min-width:100px" onclick="doSignOut()"><i class="ti ti-logout"></i> Sign Out</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info"><div class="setting-title">App Tutorial</div><div class="setting-desc">Walk through the app step-by-step, including how to fill out route cards.</div></div>
+      <button class="btn-sec" style="flex:0 0 auto" onclick="startTutorial()"><i class="ti ti-school"></i> Restart Tour</button>
     </div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Your name</div><div class="setting-desc">Shown as "Last edited by X"</div></div></div>
     <div style="display:flex;gap:8px;padding-bottom:8px"><input id="mgr-name" type="text" value="${esc(st.managerName)}" placeholder="e.g. Mike Johnson"><button class="btn-sec" style="flex:0 0 auto;min-width:60px" onclick="setMgr()">Save</button></div>
@@ -4446,7 +4471,188 @@ function scheduleMidnightFinish(){
 
 scheduleMidnightFinish();
 
-loadLocal();loadBudgets();loadNotifSettings();
+// ─── TUTORIAL ENGINE ───────────────────────────────────────────────────────
+const TUT_STEPS=[
+  {id:"welcome",title:"Welcome to InReach Check-in",tab:null,target:null,
+    body:"This quick tour walks you through the app in about 2 minutes. You can skip at any time and restart from <strong>Settings → Restart Tutorial</strong>."},
+  {id:"branch-pill",title:"Selecting Your Branch",tab:"today",target:"[data-tut='branch-pill']",
+    body:"Tap this pill to switch between branches. Recent branches appear at the top. Your active branch is shown in <strong>orange</strong>."},
+  {id:"stepper",title:"Starting Your Day",tab:"today",target:"[data-tut='stepper']",
+    body:"Tap <strong>In Progress</strong> each morning to open the day. When all routes are finished, tap <strong>Finished</strong> to close it out. This controls what shows in Trends and Drivers."},
+  {id:"recap",title:"Yesterday's Recap",tab:"today",target:"[data-tut='recap']",
+    body:"This card flags issues from the prior day — high spoils, safety concerns, low photo compliance. It persists until you dismiss it. <strong>On Mondays it covers the full weekend</strong> (Fri–Sun)."},
+  {id:"kpi-grid",title:"Daily Summary",tab:"today",target:"[data-tut='kpi-grid']",
+    body:"These tiles update live as routes are checked in. <strong>On-Time Delivery</strong> is (assets − missed) ÷ assets. <strong>Photo Compliance</strong> is (assets serviced − assets missing photos) ÷ assets serviced."},
+  {id:"route-list",title:"Route Cards",tab:"today",target:"[data-tut='route-section']",
+    body:"Each route card shows the driver, status badge, and any flags. Active routes appear at the top, finished routes at the bottom. Tap a card to expand it and fill in the day's data."},
+  {id:"route-expand",title:"Expanding a Route",tab:"today",target:"[data-tut='route-section']",
+    body:"Tap anywhere on the card header to expand it. All fields appear below. Fields with an <strong>orange label</strong> are typically mass-imported — you can still enter them manually."},
+  {id:"route-driver",title:"Today's Driver",tab:"today",target:"[data-tut='field-driver']",
+    body:"Select the driver from the dropdown, or choose <strong>Other</strong> to type a name manually. You can also assign a 2nd or 3rd driver for covered routes. This is what appears on driver scorecards."},
+  {id:"route-attendance",title:"Attendance",tab:"today",target:"[data-tut='field-attendance']",
+    body:"<strong>Present</strong> = on route. <strong>Late</strong> = started late. <strong>PTO</strong> = planned time off (excused — doesn't affect driver grade). <strong>Call Out</strong> and <strong>NCNS</strong> are unexcused and count against the driver grade."},
+  {id:"route-status",title:"Route Status",tab:"today",target:"[data-tut='field-route-status']",
+    body:"Track where the driver is in their day. <strong>Not Started → In Progress → Finished</strong>. Routes auto-finish at midnight if not marked. This drives the progress ring and route count."},
+  {id:"route-assets",title:"Assets & Locations",tab:"today",target:"[data-tut='field-assets']",
+    body:"<strong>Assets Scheduled</strong> = number of machines/kiosks to service. <strong>Locations Scheduled</strong> = number of physical sites. These come from your import file but can be entered manually."},
+  {id:"route-missed",title:"Missed Services",tab:"today",target:"[data-tut='field-missed']",
+    body:"Enter the number of assets that were <strong>skipped entirely</strong> — machine down, location closed, no access. This is a real operational miss and directly affects the On-Time Delivery % metric."},
+  {id:"route-restocks",title:"Missed Restocks",tab:"today",target:"[data-tut='field-restocks']",
+    body:"This is different from a missed service. A missed restock means the machine <strong>was serviced but the driver didn't press the restock button</strong> on the machine. It's a compliance/tracking issue, not a skipped stop."},
+  {id:"route-photos",title:"Assets Missing Photos",tab:"today",target:"[data-tut='field-photos']",
+    body:"Enter the number of assets where <strong>no photo was taken</strong>. Photo compliance is calculated as (assets serviced − missing) ÷ assets serviced. Below 90% triggers a flag on tomorrow's recap."},
+  {id:"route-safety",title:"Safety Score",tab:"today",target:"[data-tut='field-safety']",
+    body:"Enter the driver's safety score for the day (0–100). Scores below <strong>85</strong> flag on the recap card. The average over time feeds into the driver grade scorecard."},
+  {id:"route-spoils",title:"Spoils & Shrink",tab:"today",target:"[data-tut='field-spoils']",
+    body:"<strong>Spoils</strong> = product thrown away (expired/damaged). <strong>Shrink</strong> = inventory variance. Negative shrink means product appeared without revenue and is a serious flag. Typically imported, but can be entered manually."},
+  {id:"route-time",title:"Time Started & Finished",tab:"today",target:"[data-tut='field-time']",
+    body:"Log the actual start and end times for the route. These are used to identify unusually long or short routes, and feed into the late rate calculation on driver scorecards."},
+  {id:"route-finish",title:"Marking a Route Finished",tab:"today",target:"[data-tut='route-section']",
+    body:"Once all fields are filled in, set the Route Status to <strong>Finished</strong>. The card collapses and moves to the bottom of the list. The progress ring and KPI tiles update immediately."},
+  {id:"finish-day",title:"Closing Out the Day",tab:"today",target:"[data-tut='stepper']",
+    body:"When all routes are done, tap <strong>Finished</strong> on the status stepper at the top. This publishes the day's data to Trends and Driver scorecards, and clears the recap card for tomorrow."},
+  {id:"history",title:"History Tab",tab:"history",target:null,
+    body:"Browse every past briefing by date. Tap a day to see the full route-by-route detail. Days marked <strong>Finished</strong> are included in Trends and Driver calculations — In Progress days are excluded."},
+  {id:"trends",title:"Trends Tab",tab:"trends",target:null,
+    body:"Charts key metrics over 7, 30, or all-time. On-Time %, Safety, Revenue, Spoils %, and Shrink %. Each KPI tile has a sparkline showing the 7-day direction. Useful for spotting patterns across weeks."},
+  {id:"drivers",title:"Drivers Tab",tab:"drivers",target:null,
+    body:"Automated scorecards for every named driver. Graded A–D based on On-Time, Safety, Late Rate, Absences (Callout/NCNS only), Revenue vs target, and Photo compliance. <strong>Branch rank</strong> and <strong>Company rank</strong> show for drivers averaging $2K+/day."},
+  {id:"rollup",title:"Rollup Tab",tab:"rollup",target:null,
+    body:"A cross-branch view for District Managers. Filter by DM region or view all 29 branches. Sort by any metric. The variance row shows period-over-period change vs the same elapsed days last period."},
+  {id:"done",title:"You're all set! 🎉",tab:null,target:null,
+    body:"You now know the full workflow. Find the <strong>Drivers</strong> tab to track performance over time, and <strong>Settings</strong> to run imports or set announcements. Come back to this tour anytime via <strong>Settings → Restart Tutorial</strong>."},
+];
+
+const TUT_TOTAL=TUT_STEPS.length;
+let _tutActive=false;
+let _tutStep=0;
+let _tutSpotlightEl=null;
+
+function tutSeenKey(){return`tutorial_seen_${fbUser?.uid||"anon"}`;}
+function tutNeverKey(){return`tutorial_never_${fbUser?.uid||"anon"}`;}
+function isTutSeen(){try{return!!localStorage.getItem(tutSeenKey());}catch(e){return false;}}
+function isTutNever(){try{return!!localStorage.getItem(tutNeverKey());}catch(e){return false;}}
+function markTutSeen(){try{localStorage.setItem(tutSeenKey(),"1");}catch(e){}}
+function markTutNever(){try{localStorage.setItem(tutNeverKey(),"1");}catch(e){}}
+
+function shouldShowTutInvite(){return fbUser&&!isTutSeen()&&!isTutNever()&&!_tutActive;}
+
+function renderTutInvite(){
+  if(!shouldShowTutInvite())return"";
+  return`<div class="tut-invite" style="margin-bottom:14px">
+    <i class="ti ti-school" style="font-size:28px;color:rgba(255,255,255,.9);flex-shrink:0"></i>
+    <div class="tut-invite-text">
+      <div class="tut-invite-title">New to the app? Take a quick tour</div>
+      <div class="tut-invite-sub">~2 min walkthrough covering routes, imports, and reports</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+      <button onclick="startTutorial()" style="background:#fff;color:var(--brand);border:none;border-radius:var(--radius-md);padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap">Start Tour</button>
+      <button onclick="markTutNever();render()" style="background:rgba(255,255,255,.15);color:rgba(255,255,255,.85);border:none;border-radius:var(--radius-md);padding:5px 8px;font-size:11px;cursor:pointer">Don't show again</button>
+    </div>
+  </div>`;
+}
+
+window.startTutorial=function(){
+  _tutActive=true;_tutStep=0;markTutSeen();
+  render();_runTutStep();
+};
+window.tutNext=function(){
+  if(_tutStep<TUT_TOTAL-1){_tutStep++;_runTutStep();}
+  else endTutorial();
+};
+window.tutPrev=function(){
+  if(_tutStep>0){_tutStep--;_runTutStep();}
+};
+window.tutSkip=endTutorial;
+
+function endTutorial(){
+  _tutActive=false;_clearTutSpotlight();
+  document.getElementById("tut-overlay")?.remove();
+  document.getElementById("tut-card")?.remove();
+  render();
+}
+
+function _clearTutSpotlight(){
+  if(_tutSpotlightEl){
+    _tutSpotlightEl.classList.remove("tut-spotlight");
+    _tutSpotlightEl.style.position="";
+    _tutSpotlightEl.style.zIndex="";
+    _tutSpotlightEl=null;
+  }
+}
+
+function _ensureOverlay(){
+  let ov=document.getElementById("tut-overlay");
+  if(!ov){
+    ov=document.createElement("div");
+    ov.id="tut-overlay";ov.className="tut-overlay";
+    document.body.appendChild(ov);
+    setTimeout(()=>ov.classList.add("active"),10);
+  }
+  return ov;
+}
+
+async function _runTutStep(){
+  const step=TUT_STEPS[_tutStep];
+  if(!step)return;
+
+  // Switch tab if needed
+  if(step.tab&&step.tab!==st.tab){
+    st.tab=step.tab;render();
+    await new Promise(r=>setTimeout(r,120));
+  }
+
+  // If step needs a route card open, ensure first card is expanded
+  const routeFields=["route-driver","route-attendance","route-status","route-assets","route-missed","route-restocks","route-photos","route-safety","route-spoils","route-time","route-expand","route-finish"];
+  if(routeFields.includes(step.id)&&st.openIdx===null&&st.tab==="today"){
+    const b=ensureToday();
+    if(b.routes&&b.routes.filter(r=>!r.isAdHoc).length>0){
+      st.openIdx=0;render();
+      await new Promise(r=>setTimeout(r,120));
+    }
+  }
+
+  _ensureOverlay();
+  _clearTutSpotlight();
+
+  // Spotlight target
+  if(step.target){
+    const el=document.querySelector(step.target);
+    if(el){
+      _tutSpotlightEl=el;
+      el.classList.add("tut-spotlight");
+      el.scrollIntoView({behavior:"smooth",block:"center"});
+      await new Promise(r=>setTimeout(r,200));
+    }
+  }
+
+  _renderTutCard(step);
+}
+
+function _renderTutCard(step){
+  let card=document.getElementById("tut-card");
+  if(card){card.remove();}
+  card=document.createElement("div");
+  card.id="tut-card";card.className="tut-card";
+
+  const dots=TUT_STEPS.map((_,i)=>`<div class="tut-dot ${i<_tutStep?"done":i===_tutStep?"current":""}"></div>`).join("");
+  const isFirst=_tutStep===0;const isLast=_tutStep===TUT_TOTAL-1;
+
+  card.innerHTML=`
+    <div class="tut-step">Step ${_tutStep+1} of ${TUT_TOTAL}</div>
+    <div class="tut-title">${step.title}</div>
+    <div class="tut-body">${step.body}</div>
+    <div class="tut-progress">${dots}</div>
+    <div class="tut-actions">
+      ${!isFirst?`<button class="tut-btn-prev" onclick="tutPrev()"><i class="ti ti-arrow-left"></i></button>`:""}
+      <button class="tut-btn-next" onclick="tutNext()">${isLast?"Finish ✓":"Next →"}</button>
+      ${!isLast?`<button class="tut-btn-skip" onclick="tutSkip()">Skip tour</button>`:""}
+    </div>`;
+  document.body.appendChild(card);
+}
+
+// ─── END TUTORIAL ENGINE ────────────────────────────────────────────────────
+
 // Show connecting state immediately — auth state change will trigger first real render
 document.getElementById("root").innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px"><img src="icon.png" style="width:72px;height:72px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.15)" alt=""><div style="font-size:13px;color:#888;font-weight:600">Connecting…</div></div>';
 initFirebase();
