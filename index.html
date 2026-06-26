@@ -1127,9 +1127,18 @@ function showSavePulse(){
 }
 window.onDriverSelect=function(i,val){
   const b=ensureToday();collectTo(b);
-  if(val!=="__manual__")b.routes[i].driver=val;
-  else b.routes[i].driver="";
-  qW(b);render();
+  if(val==="__manual__"){
+    // Set sentinel so isManual=true on re-render (empty string would hide the input)
+    b.routes[i].driver="__manual__";
+    qW(b);render();
+    // After render, blank out sentinel and focus the text input
+    setTimeout(()=>{
+      const inp=document.querySelector(`input[data-ri="${i}"][data-field="driver"]`);
+      if(inp){b.routes[i].driver="";inp.value="";inp.focus();}
+    },80);
+  } else {
+    b.routes[i].driver=val;qW(b);render();
+  }
 };
 window.toggleBranchPicker=function(e){e&&e.stopPropagation();st.branchPickerOpen=!st.branchPickerOpen;render();};
 window.closeBranchPicker=function(){if(st.branchPickerOpen){st.branchPickerOpen=false;render();}};
@@ -1179,9 +1188,14 @@ window.addThirdDriver=function(i){const b=ensureToday();b.routes[i].thirdDriver=
 window.clearThirdDriver=function(i){const b=ensureToday();b.routes[i].thirdDriver="";qW(b);render();};
 window.onThirdDriverSelect=function(i,val){
   const b=ensureToday();
-  if(val==="__clear__")b.routes[i].thirdDriver="";
-  else if(val!=="__manual3__")b.routes[i].thirdDriver=val;
-  else b.routes[i].thirdDriver="__manual__";
+  if(val==="__clear__"){b.routes[i].thirdDriver="";}
+  else if(val==="__manual3__"){
+    b.routes[i].thirdDriver="__manual__";qW(b);render();
+    setTimeout(()=>{
+      const inp=document.querySelector(`input[data-ri="${i}"][data-field="thirdDriver"]`);
+      if(inp){b.routes[i].thirdDriver="";inp.value="";inp.focus();}
+    },80);return;
+  } else b.routes[i].thirdDriver=val;
   qW(b);render();
 };
 window.addSecondDriver=function(i){
@@ -1189,9 +1203,14 @@ window.addSecondDriver=function(i){
 };
 window.onSecondDriverSelect=function(i,val){
   const b=ensureToday();collectTo(b);
-  if(val==="__clear__")b.routes[i].secondDriver="";
-  else if(val!=="__manual2__")b.routes[i].secondDriver=val;
-  else b.routes[i].secondDriver="__manual__";
+  if(val==="__clear__"){b.routes[i].secondDriver="";}
+  else if(val==="__manual2__"){
+    b.routes[i].secondDriver="__manual__";qW(b);render();
+    setTimeout(()=>{
+      const inp=document.querySelector(`input[data-ri="${i}"][data-field="secondDriver"]`);
+      if(inp){b.routes[i].secondDriver="";inp.value="";inp.focus();}
+    },80);return;
+  } else b.routes[i].secondDriver=val;
   qW(b);render();
 };
 window.clearSecondDriver=function(i){
@@ -2163,17 +2182,17 @@ function renderRoute(r,i){
           const isManual=r.driver&&!staff.includes(r.driver);
           const selectVal=isManual?"__manual__":r.driver;
           const sd=r.secondDriver||"";
-          const sd2Manual=sd&&sd!=="__manual__"&&sd!=="__pending__"&&!staff.includes(sd);
+          const sd2Manual=sd&&sd!=="__pending__"&&!staff.includes(sd);
           const sd2Val=sd2Manual?"__manual2__":sd;
           const td=r.thirdDriver||"";
-          const td2Manual=td&&td!=="__manual__"&&td!=="__pending__"&&!staff.includes(td);
+          const td2Manual=td&&td!=="__pending__"&&!staff.includes(td);
           const td2Val=td2Manual?"__manual3__":td;
           return`<select data-ri="${i}" data-field="driver" onchange="onDriverSelect(${i},this.value)">
             <option value="">— Select —</option>
             ${staff.map(n=>`<option value="${esc(n)}"${selectVal===n?" selected":""}>${esc(n)}</option>`).join("")}
             <option value="__manual__"${isManual?" selected":""}>Other (manual entry)</option>
           </select>
-          ${isManual?`<input data-ri="${i}" data-field="driver" type="text" value="${esc(r.driver)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
+          ${isManual?`<input data-ri="${i}" data-field="driver" type="text" value="${esc(r.driver==="__manual__"?"":r.driver)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
           <div style="margin-top:8px">
             ${sd===""?`<button class="btn-sec" style="width:100%;font-size:12px;padding:7px" onclick="addSecondDriver(${i})">
               <i class="ti ti-user-plus"></i> Add 2nd driver</button>`
@@ -2186,11 +2205,11 @@ function renderRoute(r,i){
                     ${staff.map(n=>`<option value="${esc(n)}"${sd2Val===n?" selected":""}>${esc(n)}</option>`).join("")}
                     <option value="__manual2__"${sd2Manual?" selected":""}>Other (manual entry)</option>
                   </select>
-                  ${sd2Manual?`<input data-ri="${i}" data-field="secondDriver" type="text" value="${esc(sd)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
+                  ${sd2Manual?`<input data-ri="${i}" data-field="secondDriver" type="text" value="${esc(sd==="__manual__"?"":sd)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
                 </div>
                 <button onclick="clearSecondDriver(${i})" style="padding:8px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--danger-text);flex-shrink:0;min-height:38px"><i class="ti ti-x"></i></button>
               </div>
-              ${sd&&sd!=="__pending__"?`<div style="margin-top:8px">
+              ${sd&&sd!=="__pending__"&&sd!=="__manual__"?`<div style="margin-top:8px">
                 ${td===""?`<button class="btn-sec" style="width:100%;font-size:12px;padding:7px" onclick="addThirdDriver(${i})">
                   <i class="ti ti-user-plus"></i> Add 3rd driver</button>`
                 :`<div>
@@ -2202,7 +2221,7 @@ function renderRoute(r,i){
                         ${staff.map(n=>`<option value="${esc(n)}"${td2Val===n?" selected":""}>${esc(n)}</option>`).join("")}
                         <option value="__manual3__"${td2Manual?" selected":""}>Other (manual entry)</option>
                       </select>
-                      ${td2Manual?`<input data-ri="${i}" data-field="thirdDriver" type="text" value="${esc(td)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
+                      ${td2Manual?`<input data-ri="${i}" data-field="thirdDriver" type="text" value="${esc(td==="__manual__"?"":td)}" onchange="onFI()" onblur="onFI()" placeholder="Enter name" style="margin-top:6px;-webkit-user-select:text;user-select:text" autocomplete="name" autocorrect="off" autocapitalize="words" spellcheck="false">`:""}
                     </div>
                     <button onclick="clearThirdDriver(${i})" style="padding:8px 10px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--danger-text);flex-shrink:0;min-height:38px"><i class="ti ti-x"></i></button>
                   </div>
