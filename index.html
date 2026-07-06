@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#D63E0E">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Daily Check-in">
@@ -202,6 +203,10 @@ textarea{height:64px;resize:none}
 /* ── Toast ── */
 .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%) translateY(60px);background:var(--text);color:var(--bg);padding:12px 22px;border-radius:24px;font-size:13px;font-weight:700;opacity:0;transition:transform .4s cubic-bezier(.34,1.56,.64,1),opacity .25s ease;z-index:100;pointer-events:none;box-shadow:0 8px 28px rgba(0,0,0,.22);white-space:nowrap}
 .toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.offline-pill{position:fixed;bottom:74px;left:50%;transform:translateX(-50%) translateY(16px);background:#3a3a38;color:#fff;padding:8px 14px;border-radius:24px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;opacity:0;transition:transform .3s ease,opacity .25s ease;z-index:99;pointer-events:none;box-shadow:var(--shadow-md);white-space:nowrap}
+.offline-pill.show{transform:translateX(-50%) translateY(0);opacity:1}
+.offline-pill.back-online{background:var(--ok-line)}
+.offline-pill i{font-size:14px}
 .footer-note{font-size:11px;color:var(--text-3);text-align:center;margin-top:20px;padding-top:14px;border-top:1px solid var(--border);line-height:1.5}
 
 /* ── Nav bar (mobile bottom / desktop sidebar) ── */
@@ -304,20 +309,42 @@ textarea{height:64px;resize:none}
 <body>
 <div id="root"></div>
 <div id="toast" class="toast"></div>
+<div id="offline-pill" class="offline-pill"><i class="ti ti-wifi-off"></i><span>Offline — changes will sync</span></div>
 <nav class="nav-bar" id="nav-bar"></nav>
 <script>
+// ---- App version ----
+// BUMP THIS on every deploy. Shows in Settings footer + console so any device
+// can be checked against the file you just dragged to GitHub Pages.
+const APP_VERSION="5.3";
+const APP_BUILD="2026-07-05";
+console.log(`InReach Daily Check-in v${APP_VERSION} (${APP_BUILD})`);
+
+// ═══ FILE MAP — grep "SECTION:" to jump ═════════════════════════════════════
+//   CONSTANTS & ROUTE TEMPLATES    GLOBAL STATE           REPAIR SYSTEM ⚠️
+//   LOCAL STORAGE                  FIREBASE & SYNC        DOMAIN LOGIC
+//   USER-EDIT WRITE PATH ⚠️        UI ACTIONS             EXPORTS & IMPORTS
+//   RENDER: SHARED HELPERS         RENDER: TABS           ROLLUP & BUDGETS
+//   CELEBRATIONS & MISC            AUTOMATION ⚠️          TUTORIAL ENGINE
+//   BOOT
+// Golden rule: routes are only written by imports and direct user edits.
+// Cleanup/automation code may only touch status fields via updateDoc.
+// ════════════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: CONSTANTS & ROUTE TEMPLATES (per-branch routes, staff, DM_GROUPS)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Constants ----
 const DEFAULT_ROUTES=[
   {id:"DFW701",driver:"Gambino Hernandez"},{id:"DFW702",driver:"Doyle Peacock"},{id:"DFW703",driver:"Adrian Hernandez"},
   {id:"DFW704",driver:"Romond Saygo"},{id:"DFW705",driver:"Jose Vaca"},{id:"DFW706",driver:"Camaron Joplin"},
   {id:"DFW709",driver:"Natasha Brown"},{id:"DFW753",driver:"Anthony Abelaye"},{id:"DFW754",driver:"Elijah Hawkins"},
-  {id:"DFW756",driver:"David Johnson"},{id:"DFW760",driver:"Antwan Maddox"},{id:"DFW790",driver:"Craig Bolton"},
+  {id:"DFW756",driver:"Jaydon Ross"},{id:"DFW760",driver:"Antwan Maddox"},{id:"DFW790",driver:"Craig Bolton"},
   {id:"DFW791",driver:"Quincy Jacques"},{id:"DFW793",driver:"Steve Durst"},{id:"DFW808",driver:"Kenny Goldman"}
 ];
 const STAFF=[
   "Alfonso Hernandez","Rich Shelton","Michael Francis",
   "Gambino Hernandez","Doyle Peacock","Adrian Hernandez","Romond Saygo","Jose Vaca","Camaron Joplin",
-  "Natasha Brown","Anthony Abelaye","Elijah Hawkins","David Johnson","Antwan Maddox","Craig Bolton",
+  "Natasha Brown","Anthony Abelaye","Elijah Hawkins","Jaydon Ross","Antwan Maddox","Craig Bolton",
   "Quincy Jacques","Steve Durst","Kenny Goldman","Elijah Jackson","Dani Doty"
 ];
 const SAT_ROUTES=[
@@ -477,6 +504,9 @@ function dmForBranch(bid){
 const BRANCH_ROUTES_KEY="branch_routes_v1";
 const BRANCH_SEL_KEY="branch_selected_v1";
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: GLOBAL STATE (st object, branch briefings)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- State ----
 let st={branch:"dallas",tab:"today",todayView:"entry",openIdx:null,detailDate:null,trendRange:30,briefings:{},branchBriefings:{},syncStatus:"local",syncError:"",managerName:"",selectedDate:null,rollupDate:null,branchRoutes:{},budgets:{},driverRange:30,notifSettings:{},routeMgmtOpen:false,showFinishedRoutes:false,attendanceMonth:null,attendanceDay:null,budgetMonth:null,recapDismissed:null,rollupPeriod:"monthly",rollupDM:"auto",recentBranches:[],branchPickerOpen:false,rollupSort:"name"};
 let fb={app:null,db:null,auth:null,modules:null,unsubAll:null,branchUnsubs:{},unsubBranches:null,unsubBudgets:null};
@@ -527,11 +557,17 @@ function routePrefix(bid){
   return map[bid]||null;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: REPAIR SYSTEM  ⚠️ worst data-loss rap sheet in the file — read comments
+// ════════════════════════════════════════════════════════════════════════════
 function briefingIsContaminated(b,bid){
   const prefix=routePrefix(bid);
   if(!prefix||!b||!b.routes||!b.routes.length)return false;
-  // Contaminated if ANY route has a prefix belonging to a DIFFERENT branch
+  // Contaminated if ANY route has a prefix belonging to a DIFFERENT branch.
+  // Ad-hoc routes are exempt — imports legitimately create odd IDs and
+  // they're already excluded from named counts/scorecards.
   return b.routes.some(r=>{
+    if(r.isAdHoc)return false;
     const id=String(r.id||"");
     const otherPrefixes=Object.entries({dallas:"DFW",sanantonio:"SAT",austin:"AUS",houston:"HOU",midland:"WTX",linthicum:"BAL"})
       .filter(([k])=>k!==bid).map(([,v])=>v);
@@ -540,41 +576,57 @@ function briefingIsContaminated(b,bid){
 }
 
 function repairBriefing(b,bid){
-  // Build a map of existing route data keyed by route ID
+  const defaults=branchRoutes(bid);
+  // SAFETY: if we don't have this branch's route list on this device,
+  // DO NOT touch the briefing — "repairing" against an empty list wipes all routes.
+  if(!defaults||!defaults.length)return b;
   const existingData={};
   (b.routes||[]).forEach(r=>{existingData[r.id]=r;});
-  // Replace routes with correct branch defaults, merging in matching data
-  const correctRoutes=branchRoutes(bid).map(def=>{
+  const matchedIds=new Set();
+  const correctRoutes=defaults.map(def=>{
     const existing=existingData[def.id];
     if(existing){
-      // Keep operational data but fix the driver to default if it was wrong branch's driver
+      matchedIds.add(def.id);
       return{...freshRoute(def),...existing,id:def.id,assignedDriver:def.driver};
     }
     return freshRoute(def);
   });
+  // SAFETY: never drop routes we couldn't match — keep them as ad-hoc so
+  // their data (assets, spoils, revenue, photos) survives the repair.
+  (b.routes||[]).forEach(r=>{
+    if(!matchedIds.has(r.id)){
+      correctRoutes.push({...r,isAdHoc:true});
+    }
+  });
   return{...b,routes:correctRoutes};
 }
 
-function repairAllBranchData(){
+// syncToCloud=false (default): repair local state only — used on app load.
+// syncToCloud=true: also write repaired days back to Firestore — ONLY via the
+// Settings "Repair" button, where a human deliberately asked for it. This fn
+// has the worst data-loss rap sheet in the file; it does not get to write to
+// the cloud as a side effect of merely opening the app.
+function repairAllBranchData(syncToCloud=false){
   let fixed=0;
   BRANCH_IDS.forEach(bid=>{
     const brf=st.branchBriefings[bid]||{};
-    let branchFixed=0;
+    const repairedKeys=[];
     Object.keys(brf).forEach(dk=>{
       if(briefingIsContaminated(brf[dk],bid)){
+        const before=JSON.stringify(brf[dk].routes||[]);
         brf[dk]=repairBriefing(brf[dk],bid);
-        branchFixed++;fixed++;
+        // Only count/write if the repair actually changed something
+        if(JSON.stringify(brf[dk].routes||[])!==before){repairedKeys.push(dk);fixed++;}
       }
     });
-    if(branchFixed>0){
+    if(repairedKeys.length>0){
       try{localStorage.setItem(BRANCHES[bid].storeKey,JSON.stringify(brf));}catch(e){}
-      // Sync repaired data to Firebase
-      if(st.syncStatus==="live"&&fb.modules){
-        Object.values(brf).forEach(b=>writeB(b,bid).catch(()=>{}));
+      // Sync ONLY the repaired days to Firebase — never blanket-write the branch
+      if(syncToCloud&&st.syncStatus==="live"&&fb.modules){
+        repairedKeys.forEach(dk=>writeB(brf[dk],bid).catch(()=>{}));
       }
     }
   });
-  // Re-point st.briefings at the current branch
   st.briefings=st.branchBriefings[st.branch]||{};
   return fixed;
 }
@@ -593,7 +645,7 @@ window.testSync=async function(){
   }
 };
 window.runDataRepair=function(){
-  const fixed=repairAllBranchData();
+  const fixed=repairAllBranchData(true); // manual button — allowed to sync to cloud
   if(fixed>0){
     render();
     showToast(`Repaired ${fixed} contaminated briefing${fixed!==1?"s":""}`);
@@ -627,13 +679,26 @@ function fmtL(k){const[y,m,d]=k.split("-");return new Date(+y,+m-1,+d).toLocaleD
 function fmtDN(k){const[y,m,d]=k.split("-");return new Date(+y,+m-1,+d).toLocaleDateString("en-US",{weekday:"short"});}
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: LOCAL STORAGE (load/persist, load-time local-only repair)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Storage ----
 function loadLocal(){
   try{st.branch=localStorage.getItem(BRANCH_SEL_KEY)||"dallas";}catch(e){st.branch="dallas";}
   if(!BRANCHES[st.branch])st.branch="dallas";
-  try{const br=localStorage.getItem(BRANCH_ROUTES_KEY);if(br)st.branchRoutes=JSON.parse(br)||{};}catch(e){st.branchRoutes={};}
+  try{
+    const br=localStorage.getItem(BRANCH_ROUTES_KEY);if(br)st.branchRoutes=JSON.parse(br)||{};
+    // The old removeBranchRoute bug saved bare arrays instead of {routes,staff}.
+    // branchRoutes() always ignored those (fell back to defaults) — discard them
+    // so they don't get accidentally revived as valid templates.
+    Object.keys(st.branchRoutes).forEach(bid=>{
+      const t=st.branchRoutes[bid];
+      if(!t||Array.isArray(t)||!Array.isArray(t.routes))delete st.branchRoutes[bid];
+    });
+  }catch(e){st.branchRoutes={};}
   BRANCH_IDS.forEach(bid=>{const k=BRANCHES[bid].storeKey;try{const r=localStorage.getItem(k);st.branchBriefings[bid]=r?JSON.parse(r)||{}:{};}catch(e){st.branchBriefings[bid]={};}});
-  // Auto-repair any contaminated briefings from previous bugs
+  // Auto-repair any contaminated briefings from previous bugs — LOCAL ONLY on
+  // load. Cloud write-back only happens via Settings → Repair (deliberate).
   repairAllBranchData();
   st.briefings=st.branchBriefings[st.branch]||{};
   try{st.managerName=localStorage.getItem(MGR_KEY)||"";}catch(e){}
@@ -646,6 +711,9 @@ function persistLocal(){
   try{localStorage.setItem(k,JSON.stringify(st.briefings));}catch(e){}
 }
 function persistBranchRoutes(){try{localStorage.setItem(BRANCH_ROUTES_KEY,JSON.stringify(st.branchRoutes));}catch(e){}}
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: FIREBASE: CONFIG, AUTH, IDB CACHE, LAZY SUBSCRIPTIONS, writeB
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Hardcoded Firebase config ----
 const FB_CONFIG={
   apiKey:"AIzaSyCf5CdLY89puDb9jIgOL5yFT1654DRrsys",
@@ -684,7 +752,7 @@ async function initFirebase(){
       fbUser=user;
       if(user){
         st.syncStatus="live";
-        subAll();subBudgets();loadPinHash();loadAnnouncement();
+        subAll();subBudgets();loadPinHash();loadAnnouncement();subTemplates();
         render();
       } else {
         st.syncStatus="local";
@@ -936,6 +1004,9 @@ function discFb(){
 function capFocus(){const el=document.activeElement;if(!el||(!(el.id)&&!el.dataset.field))return null;return{id:el.id,ri:el.dataset&&el.dataset.ri,field:el.dataset&&el.dataset.field,value:el.value,ss:el.selectionStart,se:el.selectionEnd};}
 function resFocus(f){if(!f)return;const el=f.id?document.getElementById(f.id):document.querySelector(`[data-ri="${f.ri}"][data-field="${f.field}"]`);if(el){el.value=f.value;el.focus();try{el.setSelectionRange(f.ss,f.se);}catch(e){}}}
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: DOMAIN LOGIC: bStats, photo compliance, grades
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Stats ----
 function photoCompliance(missingPhotos, assets, missed){
   const serviced=(parseInt(assets)||0)-(parseInt(missed)||0);
@@ -1037,6 +1108,9 @@ function sparkline(values,color){
   return`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;margin:4px auto 0"><polyline points="${pts}" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/></svg>`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: USER-EDIT WRITE PATH  ⚠️ collectTo → qW (merge-on-write transaction)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Field collection ----
 function collectTo(b){
   const gv=id=>{const e=document.getElementById(id);return e?e.value:null;};
@@ -1053,19 +1127,57 @@ function collectTo(b){
   b.routes.forEach(r=>{if(!r.totes)r.totes={candy:"no",freezer:"no",cooler:"no",dock:"no"};});
   if(b.checkInStatus==="not_started")b.checkInStatus="in_progress";
 }
-function qW(b){
+// Merge a locally-edited briefing with the current server doc so a stale
+// device can never wipe routes that were added or imported elsewhere.
+// Rules are DELIBERATELY conservative — this write path has destroyed data
+// three different ways before (see repair-system comments):
+//   • route exists on BOTH sides (same id) → LOCAL wins (user is editing here)
+//   • route only on SERVER → KEPT (the fix — a full setDoc used to nuke these)
+//   • route only LOCAL → kept
+//   • all non-route fields → LOCAL wins (status quo)
+// Residual risk: two people editing the SAME route on the same day is still
+// last-write-wins. Acceptable at current scale; fixing that needs per-route
+// timestamps and is not worth the surgery yet.
+function mergeForWrite(local,server){
+  if(!server||!Array.isArray(server.routes)||!server.routes.length)return local;
+  const localIds=new Set((local.routes||[]).map(r=>String(r.id)));
+  const serverOnly=server.routes.filter(r=>!localIds.has(String(r.id)));
+  if(!serverOnly.length)return local;
+  return{...local,routes:[...(local.routes||[]),...serverOnly]};
+}
+// opts.replace=true → skip the merge and overwrite the doc wholesale. ONLY for
+// deliberate wipes (Reset Day). Everything else merges.
+function qW(b,opts){
   persistLocal();
   if(st.syncStatus!=="live"||!fb.modules||!fb.db)return;
   const branchAtQueue=st.branch;
+  const replace=!!(opts&&opts.replace);
   clearTimeout(wt);
   wt=setTimeout(async()=>{
     if(!fb.modules||!fb.db)return;
-    const{doc,setDoc}=fb.modules;
-    try{await setDoc(doc(fb.db,BRANCHES[branchAtQueue].collection,b.date),{...b,lastEditedAt:new Date().toISOString(),lastEditedBy:st.managerName||""});}
+    const{doc,setDoc,runTransaction}=fb.modules;
+    const ref=doc(fb.db,BRANCHES[branchAtQueue].collection,b.date);
+    const stamp={lastEditedAt:new Date().toISOString(),lastEditedBy:st.managerName||""};
+    // Transactions need the network. Offline → plain setDoc so the SDK queues
+    // it exactly like it always has (no behavior change for offline edits).
+    if(!replace&&navigator.onLine){
+      try{
+        await runTransaction(fb.db,async(tx)=>{
+          const snap=await tx.get(ref);
+          const merged=mergeForWrite(b,snap.exists()?snap.data():null);
+          tx.set(ref,{...merged,...stamp});
+        });
+        return;
+      }catch(e){/* fall through to plain setDoc below */}
+    }
+    try{await setDoc(ref,{...b,...stamp});}
     catch(e){console.error("qW write failed:",e.code,e.message);persistLocal();}
   },700);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: UI ACTIONS (day nav, tabs, route toggles, reset day)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Actions ----
 window.prevDay=function(){
   const d=new Date(selKey()+"T12:00:00");d.setDate(d.getDate()-1);
@@ -1250,22 +1362,40 @@ window.addBranchRoute=function(bid){
   const idEl=document.getElementById("new-route-id"),driverEl=document.getElementById("new-route-driver");
   const id=(idEl?.value||"").trim(),driver=(driverEl?.value||"").trim();
   if(!id){showToast("Enter a route ID");return;}
-  // Seed custom list from defaults if untouched
-  if(!st.branchRoutes[bid]||!st.branchRoutes[bid].routes.length){
-    st.branchRoutes[bid]={routes:defaultRoutes(bid).map(r=>({...r})),staff:[...defaultStaff(bid)]};
-  }
-  if(st.branchRoutes[bid].routes.find(r=>r.id===id)){showToast("Route already exists");return;}
-  st.branchRoutes[bid].routes.push({id,driver});
-  if(driver&&!st.branchRoutes[bid].staff.includes(driver))st.branchRoutes[bid].staff.push(driver);
-  if(idEl)idEl.value="";if(driverEl)driverEl.value="";
-  persistBranchRoutes();render();showToast("Added "+id);
+  if(branchRoutes(bid).find(r=>r.id===id)){showToast("Route already exists");return;}
+  requirePin(()=>{
+    const t=ensureCustomTemplate(bid);
+    if(t.routes.find(r=>r.id===id)){showToast("Route already exists");return;}
+    t.routes.push({id,driver});
+    if(driver&&!t.staff.includes(driver))t.staff.push(driver);
+    if(idEl)idEl.value="";if(driverEl)driverEl.value="";
+    persistBranchRoutes();syncTemplateToCloud(bid);render();showToast("Added "+id);
+  });
 };
 window.removeBranchRoute=function(bid,idx){
-  if(!confirm(`Remove route ${(branchRoutes(bid)[idx]||{}).id||idx}? This only affects future new briefings — existing data is kept.`))return;
-  const routes=branchRoutes(bid).filter((_,i)=>i!==idx);
-  st.branchRoutes[bid]=routes;
-  try{localStorage.setItem(BRANCH_ROUTES_KEY,JSON.stringify(st.branchRoutes));}catch(e){}
-  render();showToast("Route removed");
+  const r=branchRoutes(bid)[idx];if(!r)return;
+  if(!confirm(`Remove route ${r.id}? This only affects future new briefings — existing data is kept.`))return;
+  requirePin(()=>{
+    // NOTE: this used to store a bare array, which branchRoutes() ignored —
+    // Remove silently reverted the branch to hardcoded defaults. Now stores
+    // the proper {routes,staff} shape and syncs the template to the cloud.
+    const t=ensureCustomTemplate(bid);
+    t.routes=t.routes.filter(x=>x.id!==r.id);
+    persistBranchRoutes();syncTemplateToCloud(bid);render();showToast("Route removed");
+  });
+};
+window.editRouteDriver=function(bid,idx){
+  const r=branchRoutes(bid)[idx];if(!r)return;
+  const name=prompt(`Default driver for ${r.id} (blank = unassigned):`,r.driver||"");
+  if(name===null)return; // cancelled
+  requirePin(()=>{
+    const t=ensureCustomTemplate(bid);
+    const tr=t.routes.find(x=>x.id===r.id);if(!tr)return;
+    tr.driver=name.trim();
+    if(tr.driver&&!t.staff.includes(tr.driver))t.staff.push(tr.driver);
+    persistBranchRoutes();syncTemplateToCloud(bid);render();
+    showToast(`${r.id} → ${tr.driver||"unassigned"} (future days)`);
+  });
 };
 window.setRollupDate=function(dk){st.rollupDate=dk;render();};
 window.prevRollupDay=function(){const d=new Date((st.rollupDate||todayKey())+"T12:00:00");d.setDate(d.getDate()-1);st.rollupDate=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");render();};
@@ -1275,6 +1405,16 @@ window.setBS=function(s){const b=ensureToday();collectTo(b);b.checkInStatus=s;if
 try{localStorage.setItem(recapDismissKey(),todayKey());}catch(e){}st.recapDismissed=todayKey();}qW(b);render();};
 window.genBriefing=function(){const b=ensureToday();collectTo(b);b.published=true;b.publishedAt=new Date().toISOString();b.checkInStatus="finished";qW(b);st.todayView="summary";st.openIdx=null;render();showToast("Briefing published");setTimeout(()=>checkAndNotify(b),1500);};
 window.goEdit=function(){st.todayView="entry";render();};
+// The actual wipe — only ever reached through the warning modal + admin PIN.
+// {replace:true} bypasses the qW merge: a reset is a deliberate wipe, the one
+// case where "bring back server routes" would be exactly wrong.
+window.doResetDay=function(){
+  const k=selKey();
+  st.briefings[k]=freshBriefing(k);
+  qW(st.briefings[k],{replace:true});
+  st.openIdx=null;st.todayView='entry';render();
+  showToast("Day reset");
+};
 window.newBriefing=function(){
   // Build a prominent warning modal instead of a bare browser confirm
   const existing=document.getElementById('reset-modal');
@@ -1289,10 +1429,10 @@ window.newBriefing=function(){
           <i class="ti ti-alert-triangle" style="font-size:26px;color:var(--danger-text)"></i>
         </div>
         <div style="font-size:18px;font-weight:800;color:var(--danger-text);margin-bottom:8px">Reset This Day?</div>
-        <div style="font-size:13px;color:var(--text-2);line-height:1.6">This will <strong style="color:var(--danger-text)">permanently erase</strong> all route data, attendance, safety scores, spoils, shrink, and revenue entered for <strong>${selKey()}</strong>.<br><br>This cannot be undone.</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.6">This will <strong style="color:var(--danger-text)">permanently erase</strong> all route data, attendance, safety scores, spoils, shrink, and revenue entered for <strong>${selKey()}</strong>.<br><br>This cannot be undone. Requires the admin PIN.</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button onclick="document.getElementById('reset-modal').remove();const k=selKey();st.briefings[k]=freshBriefing(k);qW(st.briefings[k]);st.openIdx=null;st.todayView='entry';render();" style="background:var(--danger-text);color:#fff;border:none;border-radius:14px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;width:100%">Yes, Reset All Data</button>
+        <button onclick="document.getElementById('reset-modal').remove();requirePin(()=>doResetDay())" style="background:var(--danger-text);color:#fff;border:none;border-radius:14px;padding:13px;font-size:14px;font-weight:700;cursor:pointer;width:100%"><i class="ti ti-lock" style="font-size:14px;vertical-align:-2px;margin-right:4px"></i>Yes, Reset All Data</button>
         <button onclick="document.getElementById('reset-modal').remove()" style="background:var(--bg-2);color:var(--text);border:1px solid var(--border-2);border-radius:14px;padding:13px;font-size:14px;font-weight:600;cursor:pointer;width:100%">Cancel — Keep My Data</button>
       </div>
     </div>`;
@@ -1349,6 +1489,9 @@ window.copyB=async function(key){
   catch(e){const ta=document.createElement("textarea");ta.value=txt;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");showToast("Copied");}catch(e2){alert(txt);}document.body.removeChild(ta);}
 };
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: EXPORTS & IMPORTS (Excel, JSON, PIN protection, bulk/revenue/budget)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Excel export ----
 window.exportXL=function(){
   const dates=sortedDates();if(!dates.length){showToast("Nothing to export");return;}
@@ -1398,6 +1541,59 @@ const ADMIN_PIN_COLLECTION="dfw_notif_subs";
 const ADMIN_PIN_DOC="admin_pin";
 const ANNOUNCEMENT_DOC="announcement";
 let _cachedAnnouncement=null; // {text, ts, id}
+
+// ────────────────────────────────────────────────────────────────────────────
+// ROUTE TEMPLATE SYNC — doc dfw_notif_subs/route_templates
+// { <bid>: {routes:[{id,driver}], staff:[...], updatedAt, updatedBy} }
+// Templates used to live in localStorage only (per-device — a roster change on
+// one phone never reached anyone else). Now: cloud is the shared truth for any
+// branch present in the doc; branches absent from the doc fall back to local
+// custom or hardcoded defaults. Writes are per-branch fields via merge:true so
+// two managers editing DIFFERENT branches can't clobber each other.
+// Templates only feed freshBriefing for NEW days — never existing briefings.
+// ────────────────────────────────────────────────────────────────────────────
+const TEMPLATES_DOC="route_templates";
+function subTemplates(){
+  if(!fb.modules||!fb.db||fb.tmplUnsub)return;
+  const{doc,onSnapshot}=fb.modules;
+  fb.tmplUnsub=onSnapshot(doc(fb.db,ADMIN_PIN_COLLECTION,TEMPLATES_DOC),snap=>{
+    if(!snap.exists())return;
+    const data=snap.data()||{};let changed=false;
+    Object.keys(data).forEach(bid=>{
+      if(!BRANCHES[bid])return;
+      const t=data[bid];
+      if(t&&Array.isArray(t.routes)){
+        st.branchRoutes[bid]={routes:t.routes,staff:Array.isArray(t.staff)?t.staff:[]};
+        changed=true;
+      }
+    });
+    if(changed){persistBranchRoutes();render();}
+  },e=>console.warn("template sub error:",e.message));
+}
+// Seed a proper {routes,staff} custom template from defaults if this branch
+// doesn't have one yet (or has a corrupt shape from the old remove bug).
+function ensureCustomTemplate(bid){
+  const t=st.branchRoutes[bid];
+  if(!t||!Array.isArray(t.routes)){
+    st.branchRoutes[bid]={routes:defaultRoutes(bid).map(r=>({...r})),staff:[...defaultStaff(bid)]};
+  }
+  if(!Array.isArray(st.branchRoutes[bid].staff))st.branchRoutes[bid].staff=[...defaultStaff(bid)];
+  return st.branchRoutes[bid];
+}
+async function syncTemplateToCloud(bid){
+  if(st.syncStatus!=="live"||!fb.modules||!fb.db)return;
+  const t=st.branchRoutes[bid];
+  if(!t||!Array.isArray(t.routes))return;
+  try{
+    const{doc,setDoc}=fb.modules;
+    await setDoc(doc(fb.db,ADMIN_PIN_COLLECTION,TEMPLATES_DOC),
+      {[bid]:{routes:t.routes,staff:t.staff||[],updatedAt:new Date().toISOString(),updatedBy:st.managerName||""}},
+      {merge:true});
+  }catch(e){
+    console.error("template sync failed:",e.code,e.message);
+    showToast("Saved on this device — cloud sync failed");
+  }
+}
 
 async function loadAnnouncement(){
   if(!fb.modules||!fb.db)return;
@@ -2123,6 +2319,9 @@ window.startFbSetup=function(){st.tab="fbsetup";render();};
 window.cancelFbSetup=function(){st.tab="settings";render();};
 window.discFbBtn=function(){if(!confirm("Disconnect from Firebase?"))return;clearFbCfg();discFb();render();showToast("Disconnected");};
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: RENDER: SHARED HELPERS & ROUTE CARDS
+// ════════════════════════════════════════════════════════════════════════════
 // ---- UI helpers ----
 function syncPill(){
   if(st.syncStatus==="live")return`<span class="sync-pill sync-live"><span class="sync-dot"></span>Live</span>`;
@@ -2599,6 +2798,9 @@ function renderSum(b,opts={}){
   ${pt?`<div class="saved-note">Published ${pt}${b.lastEditedBy?" by "+esc(b.lastEditedBy):""}</div>`:""}`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: RENDER: TABS (Today, History, Drivers, Rollup, Trends, Settings)
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Tabs ----
 function renderToday(){const b=ensureToday();if(st.todayView==="summary"&&b.published)return renderSum(b,{isToday:true});return renderEntry();}
 
@@ -2765,6 +2967,9 @@ function renderSettings(){
               <span style="font-size:13px;font-weight:600">${esc(r.id)}</span>
               <span style="font-size:12px;color:var(--text-2);margin-left:8px">${esc(r.driver||"—")}</span>
             </div>
+            <button onclick="editRouteDriver('${routesBid}',${idx})" style="padding:4px 8px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text-2);font-size:11px;min-height:28px;flex-shrink:0;display:flex;align-items:center;gap:3px">
+              <i class="ti ti-pencil" style="font-size:11px"></i> Driver
+            </button>
             <button onclick="removeBranchRoute('${routesBid}',${idx})" style="padding:4px 8px;border:0.5px solid var(--border-2);border-radius:var(--radius-md);background:var(--bg-2);color:var(--text-2);font-size:11px;min-height:28px;flex-shrink:0;display:flex;align-items:center;gap:3px">
               <i class="ti ti-x" style="font-size:11px"></i> Remove
             </button>
@@ -2776,6 +2981,7 @@ function renderSettings(){
         <input id="new-route-driver" type="text" placeholder="Driver" style="margin:0">
         <button class="btn-sec" style="padding:8px 10px;flex-shrink:0" onclick="addBranchRoute('${routesBid}')"><i class="ti ti-plus"></i></button>
       </div>
+      <div style="font-size:11px;color:var(--text-2);margin-top:8px;line-height:1.5"><i class="ti ti-lock" style="font-size:11px;vertical-align:-1px"></i> Changes require the admin PIN, sync to all devices, and only affect future days — existing briefings are never touched.</div>
     </div>`:''}
   </div>
   <span class="section-lbl">Appearance</span>
@@ -2836,12 +3042,15 @@ function renderSettings(){
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Import Budgets from Excel</div><div class="setting-desc">Set monthly Vending/Market/OCS budgets per branch. <button onclick="downloadBudgetTemplate()" style="color:var(--blue);text-decoration:underline;font-size:inherit;padding:0;background:none;border:none;cursor:pointer">Template →</button></div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="importBudgetXL()"><i class="ti ti-table-import"></i> Import</button></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Export JSON backup</div><div class="setting-desc">Full data backup for current branch</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="exportJSON()"><i class="ti ti-download"></i> JSON</button></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Import JSON backup</div><div class="setting-desc">Restore from backup file</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="importJSON()"><i class="ti ti-upload"></i> Import</button></div>
-    <div class="setting-row"><div class="setting-info"><div class="setting-title">Test sync</div><div class="setting-desc">Write a test document to Firebase and confirm it succeeds</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="testSync()"><i class="ti ti-plug"></i> Test</button></div><div class="setting-row"><div class="setting-info"><div class="setting-title">Repair branch data</div><div class="setting-desc">Fixes briefings showing wrong branch routes — runs automatically on load</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="runDataRepair()"><i class="ti ti-tools"></i> Repair</button></div>
+    <div class="setting-row"><div class="setting-info"><div class="setting-title">Test sync</div><div class="setting-desc">Write a test document to Firebase and confirm it succeeds</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="testSync()"><i class="ti ti-plug"></i> Test</button></div><div class="setting-row"><div class="setting-info"><div class="setting-title">Repair branch data</div><div class="setting-desc">Fixes briefings showing wrong branch routes and syncs the fix to cloud. (Load-time repair is local-only.)</div></div><button class="btn-sec" style="flex:0 0 auto;min-width:90px" onclick="runDataRepair()"><i class="ti ti-tools"></i> Repair</button></div>
     <div class="setting-row"><div class="setting-info"><div class="setting-title">Delete all data</div><div class="setting-desc">Wipe all briefings &amp; history for current branch</div></div><button class="btn-sec btn-danger" style="flex:0 0 auto;min-width:90px" onclick="requirePin(()=>wipeAll())"><i class="ti ti-trash"></i> Delete</button></div>
   </div>
-  <div class="footer-note">Dallas DFW Morning Check-in · v4</div>`;
+  <div class="footer-note">InReach Daily Check-in · v${APP_VERSION} · deployed ${APP_BUILD}</div>`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: ROLLUP PERIODS & BUDGETS
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Rollup period helpers ----
 function getRollupPeriodDates(period,refDate){
   const d=new Date(refDate+'T12:00:00');
@@ -4249,6 +4458,9 @@ function haptic(style){
 }
 
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: CELEBRATIONS & MISC
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Celebration animations ----
 function launchConfetti(big){
   const canvas=document.createElement('canvas');
@@ -4433,6 +4645,9 @@ document.addEventListener('keydown',e=>{
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: AUTOMATION  ⚠️ status fields ONLY via updateDoc — never touch routes
+// ════════════════════════════════════════════════════════════════════════════
 // ---- Auto-finish all routes at end of day ----
 function autoFinishDay(){
   // ONLY update checkInStatus — never write routes from memory.
@@ -4490,6 +4705,9 @@ function scheduleMidnightFinish(){
 
 scheduleMidnightFinish();
 
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: TUTORIAL ENGINE (24-step spotlight tour)
+// ════════════════════════════════════════════════════════════════════════════
 // ─── TUTORIAL ENGINE ───────────────────────────────────────────────────────
 const TUT_STEPS=[
   {id:"welcome",title:"Welcome to InReach Check-in",tab:null,target:null,
@@ -4671,6 +4889,43 @@ function _renderTutCard(step){
 }
 
 // ─── END TUTORIAL ENGINE ────────────────────────────────────────────────────
+
+// ════════════════════════════════════════════════════════════════════════════
+// SECTION: BOOT: CONNECTIVITY PILL, SERVICE WORKER, INIT
+// ════════════════════════════════════════════════════════════════════════════
+// ---- Connectivity indicator ----
+// navigator.onLine is the cheap 90% signal. Firestore keeps its own connection
+// state, but for drivers on warehouse wifi this catches the common case:
+// silently editing against IDB cache with no clue nothing is syncing.
+function updateOnlinePill(){
+  const p=document.getElementById("offline-pill");if(!p)return;
+  const icon=p.querySelector("i"),label=p.querySelector("span");
+  clearTimeout(p._t);
+  if(!navigator.onLine){
+    p.classList.remove("back-online");
+    icon.className="ti ti-wifi-off";
+    label.textContent="Offline — changes will sync";
+    p.classList.add("show");
+  }else if(p.classList.contains("show")){
+    // Only flash "back online" if we were previously showing offline
+    p.classList.add("back-online");
+    icon.className="ti ti-wifi";
+    label.textContent="Back online — syncing";
+    p._t=setTimeout(()=>p.classList.remove("show","back-online"),2500);
+  }
+}
+window.addEventListener("online",updateOnlinePill);
+window.addEventListener("offline",updateOnlinePill);
+updateOnlinePill(); // catch loading the app while already offline
+
+// ---- Service worker (PWA install + offline shell) ----
+// sw.js is a separate one-time file in the repo (like icon.png). If it's
+// missing, the catch makes this a harmless no-op — app works exactly as before.
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  });
+}
 
 // Show connecting state immediately — auth state change will trigger first real render
 document.getElementById("root").innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px"><img src="icon.png" style="width:72px;height:72px;border-radius:16px;box-shadow:0 4px 16px rgba(0,0,0,.15)" alt=""><div style="font-size:13px;color:#888;font-weight:600">Connecting…</div></div>';
