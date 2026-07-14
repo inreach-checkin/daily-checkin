@@ -315,7 +315,7 @@ textarea{height:64px;resize:none}
 // ---- App version ----
 // BUMP THIS on every deploy. Shows in Settings footer + console so any device
 // can be checked against the file you just dragged to GitHub Pages.
-const APP_VERSION="5.3";
+const APP_VERSION="5.4";
 const APP_BUILD="2026-07-05";
 console.log(`InReach Daily Check-in v${APP_VERSION} (${APP_BUILD})`);
 
@@ -1794,6 +1794,43 @@ window._importRevenueXL=function(){
         if(p){const y=p[3].length===2?"20"+p[3]:p[3];return y+"-"+p[1].padStart(2,"0")+"-"+p[2].padStart(2,"0");}
         return null;
       }
+      // ---- FORCE-LOAD PHASE ----
+      // Pull CURRENT server data for every branch this file touches BEFORE
+      // mutating anything. In-memory data only exists for live-subscribed
+      // branches (lazy subs); everything else is an IDB cache that can be
+      // stale or missing days. Without this, a day that exists on the server
+      // but not in memory gets created as a minimal doc with routes:[] and
+      // the full write below WIPES the real server data. (This is the bug
+      // that ate July 8-9.) Branches that fail to load are skipped entirely —
+      // no data is better than a blind write.
+      const failedLoads=new Set();
+      if(st.syncStatus==="live"&&fb.modules&&fb.db){
+        const preScanBids=new Set();
+        rows.forEach(row=>{
+          if(!toDateKey(row["Date"]))return;
+          const bc=String(row["Branch"]||"").trim();
+          if(!bc){preScanBids.add(st.branch);return;}
+          const found=Object.entries(BRANCHES).find(([id,b])=>b.label.toLowerCase()===bc.toLowerCase()||id===bc.toLowerCase());
+          if(found)preScanBids.add(found[0]);
+        });
+        if(preScanBids.size){
+          showToast(`Loading ${preScanBids.size} branch${preScanBids.size!==1?"es":""} from cloud…`);
+          const{collection,getDocs}=fb.modules;
+          await Promise.all([...preScanBids].map(async bid=>{
+            try{
+              const snap=await getDocs(collection(fb.db,BRANCHES[bid].collection));
+              const u=st.branchBriefings[bid]||{};
+              snap.forEach(d=>{u[d.id]=d.data();}); // server wins per-day
+              Object.keys(u).forEach(k=>{if(briefingIsContaminated(u[k],bid))u[k]=repairBriefing(u[k],bid);});
+              st.branchBriefings[bid]=u;
+              idbSet(bid,u);
+            }catch(err){
+              console.error(`Failed to load ${bid} before revenue import:`,err.message);
+              failedLoads.add(bid);
+            }
+          }));
+        }
+      }
       rows.forEach(row=>{
         const dk=toDateKey(row["Date"]);
         if(!dk){skipped++;skipReasons.noDate++;return;}
@@ -1804,10 +1841,13 @@ window._importRevenueXL=function(){
           if(found)bid=found[0];
           else{skipped++;skipReasons.noBranch++;if(Object.keys(skipReasons).length<10)skipReasons[branchCol]=(skipReasons[branchCol]||0)+1;return;}
         }
+        if(failedLoads.has(bid)){skipped++;skipReasons.loadFail=(skipReasons.loadFail||0)+1;return;}
         if(!st.branchBriefings[bid])st.branchBriefings[bid]={};
         const brf=st.branchBriefings[bid];
-        // If no briefing exists for this date, create a minimal one to hold revenue
-        // (safe because there's no existing route/operational data to overwrite)
+        // If no briefing exists for this date AFTER force-loading current server
+        // data, the day genuinely doesn't exist anywhere — creating a minimal
+        // holder for revenue is safe. (Without the force-load above, this branch
+        // of code was a data shredder for unsubscribed branches.)
         if(!brf[dk]){
           brf[dk]={date:dk,checkInStatus:"not_started",plan:{coverageNotes:""},routes:[],revenue:{vending:"",market:"",ocs:""},revenueOverflow:{},published:false,publishedAt:null,lastEditedAt:null,lastEditedBy:""};
         }
@@ -1877,8 +1917,9 @@ window._importRevenueXL=function(){
         }
       });
       st.briefings=st.branchBriefings[st.branch]||{};
-      const skipDetail=skipReasons.noDate>0?` (${skipReasons.noDate} bad date${skipReasons.noBranch>0?`, ${skipReasons.noBranch} unknown branch`:""})`
-        :skipReasons.noBranch>0?` (${skipReasons.noBranch} unknown branch)`:"";
+      const skipDetail=(skipReasons.noDate>0?` (${skipReasons.noDate} bad date${skipReasons.noBranch>0?`, ${skipReasons.noBranch} unknown branch`:""})`
+        :skipReasons.noBranch>0?` (${skipReasons.noBranch} unknown branch)`:"")
+        +(skipReasons.loadFail>0?` · ⚠ ${skipReasons.loadFail} row${skipReasons.loadFail!==1?"s":""} skipped — branch failed to load, retry those`:"");
       render();showToast("Revenue imported for "+updated+" day"+(updated!==1?"s":"")+(overflow?" · "+overflow+" unlisted routes stored":"")+(skipped?" · "+skipped+" skipped"+skipDetail:"")+" · syncing…");
       if(skipReasons.noBranch>0){
         const unknowns=Object.entries(skipReasons).filter(([k])=>!["noDate","noBranch"].includes(k)).map(([k,v])=>`"${k}" (${v})`).join(", ");
@@ -2015,20 +2056,27 @@ window._importBulkXL=function(){
         const bid=rowToBranch(row,routeId);
         if(bid)touchedBids.add(bid);
       });
-      const unloadedBids=[...touchedBids].filter(bid=>!st.branchBriefings[bid]||!Object.keys(st.branchBriefings[bid]).length);
+      // Force-load EVERY touched branch from the server — not just empty ones.
+      // A stale IDB cache makes a branch look "loaded" while missing recent
+      // days; those days would be rebuilt from the template and full-written,
+      // wiping real server data (same bug class that ate July 8-9 via the
+      // revenue import). Server data wins per-day; in-memory-only days kept.
+      const unloadedBids=[...touchedBids];
+      const failedBulkLoads=new Set();
       if(unloadedBids.length&&fb.modules&&fb.db){
         showToast(`Loading ${unloadedBids.length} branch${unloadedBids.length!==1?"es":""} before preview…`);
         const{collection,getDocs}=fb.modules;
         await Promise.all(unloadedBids.map(async bid=>{
           try{
             const snap=await getDocs(collection(fb.db,BRANCHES[bid].collection));
-            const u={};snap.forEach(d=>{u[d.id]=d.data();});
+            const u=st.branchBriefings[bid]||{};
+            snap.forEach(d=>{u[d.id]=d.data();});
             Object.keys(u).forEach(dk=>{
               if(briefingIsContaminated(u[dk],bid))u[dk]=repairBriefing(u[dk],bid);
             });
             st.branchBriefings[bid]=u;
             idbSet(bid,u);
-          }catch(err){console.error(`Failed to load ${bid} before import:`,err.message);}
+          }catch(err){console.error(`Failed to load ${bid} before import:`,err.message);failedBulkLoads.add(bid);}
         }));
       }
 
@@ -2069,6 +2117,9 @@ window._importBulkXL=function(){
         if(!routeId||!dk){skippedPrev++;return;}
         const bid=rowToBranch(row,routeId);
         if(!bid){skippedPrev++;return;}
+        // Branch data couldn't be loaded — writing against unknown state is how
+        // days get wiped. Skip its rows; user can retry that branch's import.
+        if(failedBulkLoads.has(bid)){skippedPrev++;return;}
         const brf=st.branchBriefings[bid]||{};
         const b=brf[dk];
         const existingRoute=b?.routes?fuzzyRouteMatch(b.routes,routeId):null;
@@ -2174,6 +2225,7 @@ window._importBulkXL=function(){
                 <div style="font-size:10px;color:var(--warn-text);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Skipped</div>
               </div>`:""}
             </div>
+            ${failedBulkLoads.size>0?`<div style="margin-top:10px;background:var(--danger-bg);border:1px solid var(--danger-border);border-radius:var(--radius-md);padding:10px 12px;font-size:12px;color:var(--danger-text);font-weight:600"><i class="ti ti-alert-triangle" style="vertical-align:-2px"></i> Couldn't load current data for: ${[...failedBulkLoads].map(bid=>BRANCHES[bid]?.label||bid).join(", ")}. Their rows were excluded — re-run the import for those branches.</div>`:""}
           </div>
           <!-- Scrollable route list -->
           <div style="flex:1;overflow-y:auto;padding:14px 20px">
